@@ -52,6 +52,10 @@ jobs:
 
       - name: Set up Android SDK tools
         uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407 # v3.2.2
+        with:
+          # 该 action 默认装 `tools platform-tools`，而 SDK 源已下架 `tools`，
+          # 默认值会让 sdkmanager 以 "Failed to find package 'tools'" 退出。
+          packages: 'platform-tools'
 
       - name: Install SDK packages
         # SDK 源已移除 `tools` 包，只装实际需要的四项；版本与 android/app/build.gradle
