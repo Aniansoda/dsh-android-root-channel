@@ -1,0 +1,218 @@
+import { useCallback, useEffect, useRef, useState } from 'react'
+import { Cpu, Loader2, RefreshCw } from 'lucide-react'
+import { t } from '../i18n'
+import { runtimeBridge } from '../platform/native'
+import type {
+  DeviceCapabilityReport,
+  DeviceCapabilityState,
+  RuntimeBridge,
+} from '../platform/types'
+
+/**
+ * 能力标识的界面名称。
+ *
+ * 名字来自原生 `DeviceCapabilityPolicy` 的六项。没登记过的标识**回原样**而不是「未知项」：
+ * 真出现说明两侧不同步，把技术名字显示出来比藏起来更容易查出问题。
+ */
+const CAPABILITY_LABELS: Record<string, string> = {
+  shizuku: 'Shizuku（设备 Shell）',
+  kernelsu_root: 'Root 通道',
+  accessibility: '无障碍服务',
+  virtual_screen: '副屏',
+  screenshot: '整屏截图',
+  chinese_input: '中文输入',
+}
+
+/**
+ * 五种状态各一句话。`needs_action` 与 `blocked` 必须分开：一个是「点这里就行」，一个是「缺的是别处」。
+ * `degraded` 与 `ready` 也必须分开：都能用，但一个少了一层保护，说成「可用」是在瞒用户。
+ */
+const STATE_LABELS: Record<DeviceCapabilityState, string> = {
+  ready: '可用',
+  degraded: '可用（隔离受限）',
+  needs_action: '需进一步设置',
+  blocked: '依赖未满足',
+  unsupported: '当前设备不支持',
+}
+
+/**
+ * 状态 chip 的色调：直接用现成的 `.status-chip` 三档（`success` / `warn` / `danger`），不另造一套颜色。
+ *
+ * `blocked` 走默认灰：它与 `needs_action` 都在「还差一步」，差别是那一步在别处——
+ * 用颜色再区分一次只会把两个琥珀色说成两件事，不如让文字（`依赖未满足` + 具体前置）讲清楚。
+ */
+const CHIP_TONES: Record<DeviceCapabilityState, string> = {
+  ready: 'success',
+  degraded: 'warn',
+  needs_action: 'warn',
+  blocked: '',
+  unsupported: 'danger',
+}
+
+function chipClass(state: DeviceCapabilityState): string {
+  const tone = CHIP_TONES[state]
+  return tone === '' ? 'status-chip' : `status-chip ${tone}`
+}
+
+/** 原因码 → 一句人话。讲不出原因的码一律回落到「暂时说不上来」，不编。 */
+const REASON_NOTES: Record<string, string> = {
+  SHIZUKU_NOT_INSTALLED: '尚未安装 Shizuku',
+  SHIZUKU_NOT_RUNNING: 'Shizuku 服务未运行',
+  SHIZUKU_PERMISSION_DENIED: 'Shizuku 权限已被拒绝',
+  SHIZUKU_PERMISSION_UNDETERMINED: '尚未授予 Shizuku 权限',
+  SHIZUKU_NOT_CONNECTED: 'Shizuku 已授权，但服务尚未连接',
+  ACCESSIBILITY_OFF: '无障碍服务未开启',
+  ACCESSIBILITY_ENABLED_DISCONNECTED: '无障碍服务已开启，但应用尚未连接',
+  ANDROID_TOO_OLD: '需要 Android 10 或更高版本',
+  TEXT_INPUT_NEEDS_ACCESSIBILITY: '中文等非 ASCII 文字需通过无障碍服务输入',
+  DEVICE_SHELL_DISABLED: '设备命令通道未就绪',
+  ROOT_ENGINE_DISABLED: 'Root 通道尚未开启（开启后才会检测设备支持情况）',
+  ROOT_NOT_INSTALLED: '当前设备未检测到可用的 su（KernelSU / Magisk / APatch 均未安装）',
+  ROOT_PERMISSION_REQUIRED: 'root 管理器尚未把本应用加入允许列表',
+  KERNELSU_NOT_INSTALLED: '当前设备未检测到可用的 su',
+  KERNELSU_PERMISSION_REQUIRED: 'root 管理器尚未把本应用加入允许列表',
+  ROOT_IMPL_NOT_KERNELSU: '旧版本按「仅支持 KernelSU」拒绝；当前版本支持任意 root 实现',
+  ROOT_SANDBOX_DEGRADED: '命令可继续执行，但当前设备无法提供完整隔离：静态审查已按严格档收紧，对 /dev 的屏蔽未生效',
+}
+
+/** 动作码 → 下一步做什么。这里是**指路**，不替用户点：真正的入口在各自的设置区里。 */
+const ACTION_NOTES: Record<string, string> = {
+  install_shizuku: '安装 Shizuku',
+  open_shizuku: '打开 Shizuku',
+  grant_shizuku_permission: '授予 Shizuku 权限',
+  connect_shizuku: '连接 Shizuku',
+  open_accessibility_settings: '前往系统设置开启本应用的无障碍服务',
+  enable_root_engine: '前往「设备控制 › Root 通道与电源」开启',
+  grant_root_permission: '前往 root 管理器（KernelSU / Magisk / APatch）为本应用授权',
+  enable_device_shell: '前往「设备控制 › Shizuku 与设备 Shell」检查授权',
+}
+
+/** 替代码 → 退一步还能怎么做。没有替代方式时原生侧给 `null`，这一行就不显示。 */
+const ALTERNATIVE_NOTES: Record<string, string> = {
+  NO_DEVICE_SHELL: '未连接设备 Shell 时，需要整屏操作的功能将不可用',
+  SHELL_ASCII_ONLY: '仅可通过 Shell 发送可打印的 ASCII 字符',
+  SHIZUKU_SHELL: '未开启 Root 通道时，Shizuku 设备 Shell 仍可用（以 shell 身份运行，无 Root 权限）',
+}
+
+const ACTION_NEEDS_ENTRY_BUTTON = 'enable_device_shell'
+const ACTION_NEEDS_ROOT_BUTTON = 'enable_root_engine'
+
+/**
+ * 一次检测的状态。
+ *
+ * 三态放在**同一个** state 里是有意的：先前拆成 `report` / `loaded` / `failed` 三个 state 时，
+ * 一次检测会派发两次更新、提交两遍，而其中一遍的 DOM 与上一遍完全一样——
+ * 那正是 `renderProfile` 的「纯导航每次提交都必须改 DOM」要挡的白做提交。一次检测只该有一次状态变化。
+ */
+type CapabilityLoad =
+  | { status: 'loading' }
+  | { status: 'ready'; report: DeviceCapabilityReport }
+  | { status: 'failed' }
+
+/**
+ * 两份读数是否完全一样（含取样时刻）。
+ *
+ * 这张卡每 5 秒轮询一次，而能力大多时候不变：一样的读数再 `setState` 只会白渲染一次。
+ * 取样时刻不同就得更新，因为界面上写着「取样时间」——那是给用户判断数据新旧用的，不能瞒着不刷新。
+ */
+function sameReport(previous: DeviceCapabilityReport, next: DeviceCapabilityReport): boolean {
+  if (previous.atMs !== next.atMs || previous.sdkInt !== next.sdkInt) return false
+  if (previous.capabilities.length !== next.capabilities.length) return false
+  return previous.capabilities.every((entry, index) => {
+    const other = next.capabilities[index]
+    return entry.id === other.id && entry.state === other.state && entry.reason === other.reason
+      && entry.action === other.action && entry.alternative === other.alternative
+  })
+}
+
+/**
+ * 「重新检测」与失败态「重试」是**同一个动作、同一段 JSX**：抽出来免得两处各改一遍。
+ *
+ * 这段上一版复制成了两份，`disabled` 与忙碌文案差一点就只改到其中一处；忙碌文案在这里统一成
+ * 「正在检测…」，标题由调用方给（`重新检测` / `重试`）。
+ */
+function RefreshAction({ refreshing, label, onClick }: { refreshing: boolean; label: string; onClick: () => void }) {
+  return <button className="button button-secondary compact-button" type="button" disabled={refreshing} onClick={onClick}>
+    {refreshing ? <Loader2 className="spin" size={16} /> : <RefreshCw size={16} />}{refreshing ? t('正在检测…') : label}
+  </button>
+}
+
+/**
+ * 「设备能力」卡片：一次列清六项能力现在能不能用、不能用是因为什么、下一步点哪里。
+ *
+ * 四条边界：
+ *  - **判定只在原生侧做一次**：界面按 `reason`/`action`/`alternative` 三个码翻词条，不自己推导状态。
+ *    两处各判一次，迟早会出现「这里说能用、那里说不能用」。
+ *  - **读不到就说读不到**：浏览器预览与查询失败时显示「无法读取设备能力清单」并给重试，
+ *    绝不显示成「六项都不可用」——把「读不到」说成「确认不可用」与事实相反。
+ *  - **就绪的行不教用户去设置**：`ready` 的行不显示原因、下一步与替代方式，免得让人以为还要做什么；
+ *    但 `degraded` 的行**要**说原因——那正是「能用但不完整」里最该知道的那一半。
+ *  - 卡片本身**不写入任何浏览器存储**，也不触发任何动作。
+ */
+export function DeviceCapabilityCard({ bridge = runtimeBridge, onOpenDeviceShell, onOpenRootEngine }: { bridge?: RuntimeBridge; onOpenDeviceShell?: () => void; onOpenRootEngine?: () => void }) {
+  const [load, setLoad] = useState<CapabilityLoad>({ status: 'loading' })
+  const [refreshing, setRefreshing] = useState(false)
+  const requestId = useRef(0)
+  const invalidate = useCallback(() => { requestId.current += 1 }, [])
+
+  const refresh = useCallback(async (manual = false) => {
+    const currentRequest = ++requestId.current
+    if (manual) setRefreshing(true)
+    try {
+      const next = await bridge.getDeviceCapabilities()
+      if (currentRequest !== requestId.current) return
+      setLoad(previous => (previous.status === 'ready' && sameReport(previous.report, next)
+        ? previous
+        : { status: 'ready', report: next }))
+    } catch {
+      if (currentRequest !== requestId.current) return
+      setLoad(previous => (previous.status === 'failed' ? previous : { status: 'failed' }))
+    } finally {
+      if (manual) setRefreshing(false)
+    }
+  }, [bridge])
+  useEffect(() => {
+    const refreshWhenVisible = () => {
+      if (document.visibilityState === 'visible') void refresh()
+      else invalidate()
+    }
+    refreshWhenVisible()
+    const timer = window.setInterval(() => {
+      if (document.visibilityState === 'visible') void refresh()
+    }, 5_000)
+    document.addEventListener('visibilitychange', refreshWhenVisible)
+    window.addEventListener('focus', refreshWhenVisible)
+    return () => {
+      window.clearInterval(timer)
+      document.removeEventListener('visibilitychange', refreshWhenVisible)
+      window.removeEventListener('focus', refreshWhenVisible)
+      invalidate()
+    }
+  }, [invalidate, refresh])
+
+  const report = load.status === 'ready' ? load.report : null
+  const failed = load.status === 'failed'
+
+  return <section className="settings-section" aria-labelledby="device-capabilities">
+    <div className="section-title"><span className="section-icon"><Cpu size={19} /></span>
+      <div><h2 id="device-capabilities">{t('设备能力')}</h2>
+        <p>{t('检测 Shizuku、Root 通道、无障碍与副屏的当前状态')}</p></div>
+    </div>
+    {load.status === 'loading' && <p className="settings-note">{t('正在检测设备能力…')}</p>}
+    {report !== null && <div className="device-capability-list" role="list">
+      {report.capabilities.map(entry => <p className="device-capability-row" role="listitem" key={entry.id}>
+        <strong>{t(CAPABILITY_LABELS[entry.id] ?? entry.id)}</strong>{' '}
+        <span className={chipClass(entry.state)}>{t(STATE_LABELS[entry.state])}</span>
+        {entry.state !== 'ready' && <>
+          {' · '}{t(REASON_NOTES[entry.reason] ?? '暂无法确定具体原因')}
+          {entry.action !== null && <>{' · '}{t('下一步：{0}', t(ACTION_NOTES[entry.action] ?? entry.action))}</>}
+          {entry.action === ACTION_NEEDS_ENTRY_BUTTON && onOpenDeviceShell !== undefined && <button className="button button-secondary compact-button" type="button" onClick={onOpenDeviceShell}>{t('Shizuku 与设备 Shell')}</button>}
+          {entry.action === ACTION_NEEDS_ROOT_BUTTON && onOpenRootEngine !== undefined && <button className="button button-secondary compact-button" type="button" onClick={onOpenRootEngine}>{t('Root 通道与电源')}</button>}
+          {entry.alternative !== null && <>{' · '}{t('替代方式：{0}', t(ALTERNATIVE_NOTES[entry.alternative] ?? entry.alternative))}</>}
+        </>}
+      </p>)}
+    </div>}
+    {report !== null && <div className="device-capability-footer"><span className="settings-note">{t('取样时间：{0}', new Date(report.atMs).toLocaleTimeString())} · {t('状态变化时自动重测')}</span><RefreshAction refreshing={refreshing} label={t('重新检测')} onClick={() => { void refresh(true) }} /></div>}
+    {failed && <p className="device-capability-error" role="alert">{t('无法读取设备能力清单')} <RefreshAction refreshing={refreshing} label={t('重试')} onClick={() => { void refresh(true) }} /></p>}
+  </section>
+}

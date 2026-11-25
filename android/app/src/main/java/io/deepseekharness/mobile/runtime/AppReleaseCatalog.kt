@@ -1,0 +1,332 @@
+package io.deepseekharness.mobile.runtime
+
+import android.content.Context
+import android.content.pm.PackageManager
+import android.system.Os
+import androidx.core.content.pm.PackageInfoCompat
+import org.json.JSONObject
+import java.io.File
+import java.io.FileOutputStream
+import java.nio.file.Files
+import java.nio.file.LinkOption
+import java.util.UUID
+
+/** 本机已安装的应用版本：[versionName] 给人看，[versionCode] 只作为事实回报给界面。 */
+internal data class InstalledAppInfo(val versionName: String, val versionCode: Long)
+
+/**
+ * 应用自身（APK）的版本号规则。
+ *
+ * 形态是 `0.2.0` 或 `0.2.0-mobile-308`：后缀是**同一版本内的构建序号**，不是预发布标记。
+ * 所以 `0.2.0` 视为序号 0，排序为 `0.2.0` < `0.2.0-mobile-308` < `0.2.1-mobile-2`。
+ *
+ * 光靠这个比较还不够：同版本正式版（`0.2.13`，序号 0）通常是预览版验证之后才发的，
+ * 序号反而最小。 [AppReleaseCatalog.availableRelease] 因此额外把「同版本正式版」算作
+ * 已安装预览构建的更新（见那里的收敛路径说明）。
+ *
+ * 注意：运行时镜像的排序规则（[RuntimeUpdatePolicy.compareVersions]）把「无后缀」排在
+ * 「有后缀」之前，与这里相反——两者不能互相复用。
+ */
+internal object AppUpdateVersion {
+    private val pattern = Regex("^v?([0-9]+)\\.([0-9]+)\\.([0-9]+)(?:-mobile-([0-9]+))?$")
+
+    data class Version(
+        /** 标签去掉前导 `v` 后的原文，直接拿去展示与拼文件名。 */
+        val text: String,
+        val major: Long,
+        val minor: Long,
+        val patch: Long,
+        val suffix: Long,
+    ) : Comparable<Version> {
+        override fun compareTo(other: Version): Int =
+            compareValuesBy(this, other, { it.major }, { it.minor }, { it.patch }, { it.suffix })
+    }
+
+    /** 解析标签或已安装的版本名；形态不合规返回 null（调用方据此跳过或判定「没有更新」）。 */
+    fun parse(value: String): Version? {
+        val trimmed = value.trim()
+        val match = pattern.matchEntire(trimmed) ?: return null
+        val text = trimmed.removePrefix("v")
+        // 版本号最终要过前端 `^[A-Za-z0-9._-]{1,96}$`：位数离谱时宁可当成没有更新。
+        if (text.length > GitHubReleases.MAX_IDENTIFIER_CHARS) return null
+        return Version(
+            text = text,
+            major = match.groupValues[1].toLongOrNull() ?: return null,
+            minor = match.groupValues[2].toLongOrNull() ?: return null,
+            patch = match.groupValues[3].toLongOrNull() ?: return null,
+            suffix = match.groupValues[4].toLongOrNull() ?: 0L,
+        )
+    }
+}
+
+/**
+ * 应用自身更新的发布频道。
+ *
+ * 持久化在原生 SharedPreferences（前端不存、不传参）：频道决定下载哪个 APK，与
+ * 「目录与地址由原生自己决定」是同一条安全边界。 [STABLE] 只收正式版（无 `-mobile-N`
+ * 后缀），[BETA] 额外把测试构建纳入候选；已装测试构建的设备在任何频道下都能收到
+ * 同版本正式版（收敛路径在 [AppReleaseCatalog] 内，与频道正交）。
+ */
+internal enum class AppUpdateChannel(val id: String) {
+    STABLE("stable"),
+    BETA("beta");
+
+    companion object {
+        /** 未设置或读不到时的频道：正式版。 */
+        val DEFAULT = STABLE
+
+        private const val PREFS_NAME = "dsh-app-update-channel"
+        private const val KEY_CHANNEL = "channel"
+        private const val BACKUP_FILE_NAME = ".dsh-app-update-channel"
+        private const val MAX_BACKUP_BYTES = 16L
+
+        /** 桥入参/持久化值 → 频道；非法值返回 null，由调用方决定报错还是回默认。 */
+        fun fromId(value: String?): AppUpdateChannel? = entries.firstOrNull { it.id == value }
+
+        /**
+         * 未曾显式保存频道时的默认推断：本机已装 `-mobile-N` 测试构建时默认走 [BETA]，
+         * 避免重装/清数据直装测试包后退回正式版；用户一旦显式保存过 [STABLE] 或 [BETA]，
+         * 以持久化记录为唯一真源。
+         */
+        internal fun defaultForInstalled(installedVersionName: String?): AppUpdateChannel {
+            val parsed = installedVersionName?.let(AppUpdateVersion::parse)
+            return if (parsed != null && parsed.suffix != 0L) BETA else DEFAULT
+        }
+
+        /**
+         * 读取用户选择的频道。
+         *
+         * SharedPreferences 是主存储；小型文件副本只在主存储缺失或损坏时恢复。
+         * 这样旧版本用户第一次升级时可以补齐副本，同时不会让一个过期副本覆盖用户
+         * 刚刚保存的频道。加 `@Synchronized` 防止并发读/写把旧值写回副本。
+         */
+        @Synchronized
+        fun load(context: Context): AppUpdateChannel {
+            val app = context.applicationContext
+            val prefs = runCatching {
+                app.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            }.getOrNull()
+            // 旧版本只有 SharedPreferences：仅当副本缺失或不一致时补写副本，减少无谓落盘。
+            val stored = runCatching { prefs?.let { fromId(it.getString(KEY_CHANNEL, null)) } }.getOrNull()
+            if (stored != null) {
+                if (runCatching { readBackup(app) }.getOrNull() != stored) {
+                    runCatching { writeBackup(app, stored) }
+                }
+                return stored
+            }
+            val recovered = runCatching { readBackup(app) }.getOrNull()
+            if (recovered != null) {
+                // 回填失败不应遮蔽已经恢复出的值；commit 结果只影响下次读取。
+                prefs?.let { runCatching { it.edit().putString(KEY_CHANNEL, recovered.id).commit() } }
+                return recovered
+            }
+            return defaultForInstalled(runCatching { AppReleaseCatalog.installed(app).versionName }.getOrNull())
+        }
+
+        /**
+         * 同步持久化频道选择。用 commit() 而非 apply()——频道切换必须让落盘结果立即可靠，
+         * 否则可能出现「前端以为切换成功，下次启动仍用旧频道」的状态分叉。
+         * 失败时抛 [RuntimeFailure]，由调用方走已有的错误回退路径。
+         */
+        @Synchronized
+        fun save(context: Context, channel: AppUpdateChannel) {
+            val app = context.applicationContext
+            val prefs = app.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            val ok = prefs.edit().putString(KEY_CHANNEL, channel.id).commit()
+            if (!ok) throw RuntimeFailure("APP_UPDATE_CHANNEL_SAVE_FAILED", "频道保存失败，请重试")
+            // SharedPreferences 已成功落盘；副本失败不能让用户刚保存的选择报错。
+            runCatching { writeBackup(app, channel) }
+        }
+
+        /** 供纯 JVM 测试和读路径复用的副本文本解析。 */
+        internal fun parseBackup(value: String?): AppUpdateChannel? = fromId(value?.trim())
+
+        private fun backupFile(context: Context): File = File(context.applicationContext.filesDir, BACKUP_FILE_NAME)
+
+        private fun readBackup(context: Context): AppUpdateChannel? {
+            val file = backupFile(context)
+            val path = file.toPath()
+            if (!Files.isRegularFile(path, LinkOption.NOFOLLOW_LINKS) || Files.size(path) !in 1..MAX_BACKUP_BYTES) return null
+            return parseBackup(file.readText(Charsets.US_ASCII))
+        }
+
+        private fun writeBackup(context: Context, channel: AppUpdateChannel) {
+            val target = backupFile(context)
+            val parent = target.parentFile
+                ?.takeIf { it.isDirectory && !Files.isSymbolicLink(it.toPath()) }
+                ?: error("频道副本目录不可用")
+            val temporary = File(parent, ".${target.name}.${UUID.randomUUID()}.tmp")
+            try {
+                FileOutputStream(temporary).use { output ->
+                    output.write(channel.id.toByteArray(Charsets.US_ASCII))
+                    output.fd.sync()
+                }
+                Os.chmod(temporary.absolutePath, 0x180)
+                Os.rename(temporary.absolutePath, target.absolutePath)
+            } finally {
+                runCatching { temporary.delete() }
+            }
+        }
+    }
+}
+
+/**
+ * 应用自身（APK）的更新目录。
+ *
+ * 与运行时镜像分开：运行时更新换的是 rootfs，这里换的是 APK，版本号体系也不同。
+ * 只认本仓库发布里的 `app-release.apk`，且只信带 `sha256:` 摘要的那一个。
+ *
+ * 下载来的包**只能**交给系统安装器去装（Android 不允许应用静默安装），这里只负责
+ * 「找到一个确实比本机新的包，并说清它多大、摘要是什么、更新说明写了什么」。
+ */
+internal class AppReleaseCatalog(
+    /** 取发布目录 JSON 的接缝：单测喂固定 JSON，不联网。 */
+    private val catalogBytes: () -> ByteArray = { RuntimeHttp().catalogBytes(GitHubReleases.URL) },
+) {
+    /**
+     * 一个可安装的更新包；[notes] 已按前端上限截断。
+     *
+     * [url] 只给下载用：它不进桥载荷（界面拿到的只有版本号、体积、摘要与说明），也不进审计。
+     */
+    data class Release(val version: String, val url: String, val bytes: Long, val sha256: String, val notes: String)
+
+    /**
+     * 本机已安装版本 + 远端可用更新。
+     *
+     * 没有可用更新时**不出现** [UPDATE_KEY] 键：前端按「键缺失＝没有更新」判读，
+     * 回一个 `available: null` 会被当成半截载荷拒绝。
+     */
+    fun state(
+        installed: InstalledAppInfo,
+        installAllowed: Boolean,
+        available: Release?,
+    ): JSONObject {
+        val state = JSONObject()
+            .put("installedVersion", installed.versionName)
+            .put("installedVersionCode", installed.versionCode)
+            .put("installAllowed", installAllowed)
+        if (available != null) {
+            state.put(
+                UPDATE_KEY,
+                JSONObject()
+                    .put("version", available.version)
+                    .put("bytes", available.bytes)
+                    .put("sha256", available.sha256)
+                    .put("notes", available.notes),
+            )
+        }
+        return state
+    }
+
+    /**
+     * 严格大于已安装版本的最新发布；没有可用更新时返回 null。
+     *
+     * [channel] 为 [AppUpdateChannel.STABLE] 时跳过一切 `-mobile-N` 测试构建，候选只剩正式版；
+     * [AppUpdateChannel.BETA] 不做这层过滤（行为与引入频道前一致）。
+     */
+    fun availableRelease(installed: InstalledAppInfo, channel: AppUpdateChannel): Release? {
+        // 读不出已安装版本就无法证明「严格更新」：宁可回「没有更新」，
+        // 也不要怂恿用户去装一个可能比本机更旧的包。
+        val installedVersion = AppUpdateVersion.parse(installed.versionName) ?: return null
+        var best: Release? = null
+        var bestVersion: AppUpdateVersion.Version? = null
+        for (release in GitHubReleases.parse(catalogBytes())) {
+            val version = AppUpdateVersion.parse(release.tag) ?: continue
+            if (channel == AppUpdateChannel.STABLE && version.suffix != 0L) continue
+            if (!isUpdateOf(installedVersion, version)) continue
+            if (bestVersion != null && version <= bestVersion) continue
+            val asset = GitHubReleases.asset(release, APK_ASSET) ?: continue
+            // 下载层只接受 1..MAX_COMPRESSED_BYTES：超出范围的包不拿出来当「可用更新」，
+            // 否则界面会给出一个点了必然失败的按钮。
+            if (asset.bytes !in 1..RuntimeLimits.MAX_COMPRESSED_BYTES) continue
+            bestVersion = version
+            best = Release(
+                version = version.text,
+                url = asset.url,
+                bytes = asset.bytes,
+                sha256 = asset.sha256,
+                notes = notes(release.notes),
+            )
+        }
+        return best
+    }
+
+    fun isUpdateOf(installed: InstalledAppInfo, release: Release): Boolean {
+        val current = AppUpdateVersion.parse(installed.versionName) ?: return false
+        val candidate = AppUpdateVersion.parse(release.version) ?: return false
+        return isUpdateOf(current, candidate)
+    }
+
+    /**
+     * 这个发布算不算已安装版本的更新。
+     *
+     * 常规判据是「严格更大」。这里额外交一条**收敛路径**：装了同版本预览构建
+     * （如 `0.2.13-mobile-5`）的设备，也要能收到同版本正式版（`0.2.13`）。发布流程里
+     * 预览版先出、验证通过后才发正式版，而序号只记 CI 运行号，正式版的序号反而是 0；
+     * 少了这条，正式版会被判成「更旧」，这些设备永远收不到它，只能手动装包。
+     *
+     * 与频道的关系：正式版频道对测试构建的整体过滤在 [availableRelease] 里做，本函数不感知
+     * 频道；「正式版安装不跟随同版本测试包」这条既有规则留在本函数内，两个频道下都生效——
+     * 否则测试版频道的用户装完正式版后，会再次看到同一版本的最新测试构建。收敛路径也因此
+     * 在两个频道下都可用：测试版用户切回正式版频道后，仍能收到同版本正式版。
+     */
+    private fun isUpdateOf(installed: AppUpdateVersion.Version, candidate: AppUpdateVersion.Version): Boolean {
+        // 稳定版（无 mobile 后缀）不接受同版本测试包；否则正式版安装完成后会再次提示
+        // 同一版本的最新测试构建。更高主版本的测试包仍属于可用更新。
+        if (installed.suffix == 0L &&
+            candidate.major == installed.major &&
+            candidate.minor == installed.minor &&
+            candidate.patch == installed.patch
+        ) return false
+        if (candidate > installed) return true
+        return installed.suffix != 0L &&
+            candidate.suffix == 0L &&
+            candidate.major == installed.major &&
+            candidate.minor == installed.minor &&
+            candidate.patch == installed.patch
+    }
+
+    /** 更新说明：去掉首尾空白并截断到 [MAX_NOTES_CHARS]（前端超限直接报错，不会替我们截断）。 */
+    fun notes(body: String): String = body.trim().take(MAX_NOTES_CHARS)
+
+    companion object {
+        /** 更新包资产名。 */
+        const val APK_ASSET = "app-release.apk"
+
+        /** 更新说明上限，与前端 `MAX_APP_UPDATE_NOTES_LENGTH` 同源，改一处要改两处。 */
+        const val MAX_NOTES_CHARS = 4000
+
+        /** 状态载荷里「可用更新」的键；**没有更新时这个键不出现**。 */
+        const val UPDATE_KEY = "available"
+
+        /** 读不到 versionName 时的占位：形态合法，且会让比较侧判定「没有可用更新」。 */
+        const val UNKNOWN_VERSION = "unknown"
+
+        /**
+         * 读取本机已安装版本。
+         *
+         * 用 `PackageManager` 而不是 `BuildConfig`：后者是构建期常量，而这里要回答的是
+         * 「这台设备上装着的那个包是哪个版本」——覆盖安装、多渠道分发时两者可能不一致，
+         * 而这个值决定要不要提示更新。
+         */
+        fun installed(context: Context): InstalledAppInfo {
+            val info = try {
+                context.packageManager.getPackageInfo(context.packageName, 0)
+            } catch (error: PackageManager.NameNotFoundException) {
+                throw RuntimeFailure("APP_UPDATE_STATE_FAILED", "读不到本机应用版本", error)
+            }
+            // versionName 可能缺失或被改坏：回占位值，让界面显示一个诚实的「未知」而不是崩掉。
+            val name = info.versionName?.takeIf { GitHubReleases.isIdentifier(it) } ?: UNKNOWN_VERSION
+            return InstalledAppInfo(versionName = name, versionCode = PackageInfoCompat.getLongVersionCode(info))
+        }
+
+        /** 是否已允许安装未知应用（Android 8.0 起是每应用开关，minSdk 26 可直接问）。 */
+        fun installAllowed(context: Context): Boolean = try {
+            context.packageManager.canRequestPackageInstalls()
+        } catch (_: Throwable) {
+            // 个别 ROM 上 PackageManager 会抛 SecurityException/UnsupportedOperationException：
+            // 一律按「未授权」处理——引导用户去系统设置页，也不要承诺一次必然被拦下的安装。
+            false
+        }
+    }
+}

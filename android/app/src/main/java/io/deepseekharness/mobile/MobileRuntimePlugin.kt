@@ -1,0 +1,5095 @@
+package io.deepseekharness.mobile
+
+import android.Manifest
+import android.app.KeyguardManager
+import android.content.ClipData
+import android.content.Intent
+import android.content.pm.PackageManager
+import android.hardware.display.DisplayManager
+import android.net.Uri
+import android.os.Build
+import android.os.Handler
+import android.os.Looper
+import android.os.SystemClock
+import android.provider.DocumentsContract
+import android.provider.Settings
+import android.util.DisplayMetrics
+import android.view.Display
+import android.view.WindowManager
+import android.webkit.MimeTypeMap
+import androidx.activity.result.ActivityResult
+import androidx.biometric.BiometricManager
+import androidx.biometric.BiometricPrompt
+import androidx.core.content.ContextCompat
+import androidx.core.content.FileProvider
+import com.getcapacitor.JSArray
+import com.getcapacitor.JSObject
+import com.getcapacitor.Plugin
+import com.getcapacitor.PluginCall
+import com.getcapacitor.PluginMethod
+import com.getcapacitor.annotation.ActivityCallback
+import com.getcapacitor.annotation.CapacitorPlugin
+import com.getcapacitor.annotation.Permission
+import com.getcapacitor.annotation.PermissionCallback
+import io.deepseekharness.mobile.overlay.OverlayBallPolicy
+import io.deepseekharness.mobile.accessibility.AccessibilityAppConfig
+import io.deepseekharness.mobile.accessibility.AccessibilityAppConfigRead
+import io.deepseekharness.mobile.accessibility.AccessibilityAppConfigStore
+import io.deepseekharness.mobile.accessibility.AccessibilityAutomationPolicy
+import io.deepseekharness.mobile.accessibility.AccessibilityAutomationStore
+import io.deepseekharness.mobile.capability.DeviceCapability
+import io.deepseekharness.mobile.capability.DeviceCapabilityFacts
+import io.deepseekharness.mobile.capability.DeviceCapabilityPolicy
+import io.deepseekharness.mobile.accessibility.AccessibilityBiometricCodes
+import io.deepseekharness.mobile.accessibility.AccessibilityGuardException
+import io.deepseekharness.mobile.accessibility.AccessibilityPasswordStore
+import io.deepseekharness.mobile.accessibility.AutomationControlPolicy
+import io.deepseekharness.mobile.accessibility.AutomationControlStore
+import io.deepseekharness.mobile.accessibility.AutomationRuleEditor
+import io.deepseekharness.mobile.accessibility.AutomationRulePreferences
+import io.deepseekharness.mobile.accessibility.AutomationRuleStore
+import io.deepseekharness.mobile.accessibility.AutomationRunLogPolicy
+import io.deepseekharness.mobile.accessibility.AutomationSkipMessages
+import io.deepseekharness.mobile.accessibility.AutomationTaskSnapshot
+import io.deepseekharness.mobile.accessibility.DeepSeekAccessibilityService
+import io.deepseekharness.mobile.accessibility.toRuleJson
+import io.deepseekharness.mobile.runtime.AppReleaseCatalog
+import io.deepseekharness.mobile.runtime.AppUpdateCache
+import io.deepseekharness.mobile.runtime.AppUpdateChannel
+import io.deepseekharness.mobile.runtime.AppUpdateInstallPolicy
+import io.deepseekharness.mobile.runtime.AppUpdateProgressThrottle
+import io.deepseekharness.mobile.runtime.AppUpdateStorage
+import io.deepseekharness.mobile.runtime.HarnessKeepAlivePolicy
+import io.deepseekharness.mobile.runtime.HarnessWebAuth
+import io.deepseekharness.mobile.runtime.HarnessOutputTailSource
+import io.deepseekharness.mobile.runtime.clampHarnessTailBytes
+import io.deepseekharness.mobile.runtime.MailboxExportOutcome
+import io.deepseekharness.mobile.runtime.ModelCatalogProbe
+import io.deepseekharness.mobile.runtime.ModelConnectivityProbe
+import io.deepseekharness.mobile.runtime.PageNetworkAccess
+import io.deepseekharness.mobile.runtime.draftOrSavedApi
+import io.deepseekharness.mobile.runtime.draftOrSavedBaseUrl
+import io.deepseekharness.mobile.runtime.MailboxDirectoryEntry
+import io.deepseekharness.mobile.runtime.MailboxDirectoryState
+import io.deepseekharness.mobile.runtime.TaskLiveNotificationCompat
+import io.deepseekharness.mobile.runtime.TaskNotification
+import io.deepseekharness.mobile.runtime.MailboxImportOutcome
+import io.deepseekharness.mobile.runtime.MailboxState
+import io.deepseekharness.mobile.runtime.MobileRuntimeController
+import io.deepseekharness.mobile.runtime.PluginInstallLock
+import io.deepseekharness.mobile.runtime.RuntimeEventSink
+import io.deepseekharness.mobile.runtime.RuntimeCacheCleanup
+import io.deepseekharness.mobile.runtime.RuntimeCacheEntries
+import io.deepseekharness.mobile.runtime.RuntimeCleanupOutcome
+import io.deepseekharness.mobile.runtime.RuntimeFailure
+import io.deepseekharness.mobile.runtime.RuntimeFiles
+import io.deepseekharness.mobile.runtime.RuntimeHost
+import io.deepseekharness.mobile.runtime.RuntimeHttp
+import io.deepseekharness.mobile.runtime.RuntimeIntent
+import io.deepseekharness.mobile.runtime.RuntimeKeepAliveSnapshot
+import io.deepseekharness.mobile.runtime.RuntimeMailbox
+import io.deepseekharness.mobile.runtime.RuntimeMailboxLayout
+import io.deepseekharness.mobile.runtime.RuntimeMailboxPolicy
+import io.deepseekharness.mobile.runtime.RuntimePhase
+import io.deepseekharness.mobile.runtime.RuntimeAutoSnapshotOutcome
+import io.deepseekharness.mobile.runtime.RuntimeAutoSnapshotStatus
+import io.deepseekharness.mobile.runtime.RuntimeReleaseCatalog
+import io.deepseekharness.mobile.runtime.RuntimeResidueInventory
+import io.deepseekharness.mobile.runtime.RuntimeResidueSizing
+import io.deepseekharness.mobile.runtime.RuntimeSelfCheckPolicy
+import io.deepseekharness.mobile.runtime.RuntimeSessionSnapshotCodes
+import io.deepseekharness.mobile.runtime.PreserveStore
+import io.deepseekharness.mobile.runtime.RuntimeLibrary
+import io.deepseekharness.mobile.runtime.RuntimeSettings
+import io.deepseekharness.mobile.runtime.RuntimeSource
+import io.deepseekharness.mobile.runtime.RuntimeStateSnapshot
+import io.deepseekharness.mobile.runtime.RuntimeStorageDirs
+import io.deepseekharness.mobile.runtime.RuntimeValidation
+import io.deepseekharness.mobile.runtime.RuntimeVersionInfo
+import io.deepseekharness.mobile.runtime.RuntimeVersionPolicy
+import io.deepseekharness.mobile.runtime.RuntimeWorkspaceFiles
+import io.deepseekharness.mobile.runtime.residueBytesToken
+import io.deepseekharness.mobile.runtime.StorageDirCodes
+import io.deepseekharness.mobile.runtime.StorageDirectoryState
+import io.deepseekharness.mobile.runtime.StorageDirStatus
+import io.deepseekharness.mobile.runtime.StorageDirsState
+import io.deepseekharness.mobile.runtime.audit.AuditEvent
+import io.deepseekharness.mobile.runtime.audit.AuditResult
+import io.deepseekharness.mobile.runtime.audit.PrivateAuditLog
+import io.deepseekharness.mobile.runtime.diagnostics.DiagnosticEvent
+import io.deepseekharness.mobile.runtime.diagnostics.DiagnosticExport
+import io.deepseekharness.mobile.runtime.diagnostics.DiagnosticLevel
+import io.deepseekharness.mobile.runtime.diagnostics.DiagnosticPolicy
+import io.deepseekharness.mobile.runtime.diagnostics.DiagnosticState
+import io.deepseekharness.mobile.runtime.diagnostics.DiagnosticText
+import io.deepseekharness.mobile.shizuku.DeviceCommand
+import io.deepseekharness.mobile.shizuku.DeviceCommandResult
+import io.deepseekharness.mobile.shizuku.ShizukuState
+import io.deepseekharness.mobile.shizuku.ShizukuAutoConnect
+import io.deepseekharness.mobile.virtualscreen.VirtualScreenPolicy
+import io.deepseekharness.mobile.virtualscreen.VirtualScreenPreferences
+import io.deepseekharness.mobile.virtualscreen.VirtualScreenService
+import io.deepseekharness.mobile.virtualscreen.VirtualScreenSettings
+import io.deepseekharness.mobile.virtualscreen.VirtualScreenSettingsUpdate
+import io.deepseekharness.mobile.virtualscreen.VirtualScreenSpec
+import io.deepseekharness.mobile.virtualscreen.VirtualScreenStart
+import io.deepseekharness.mobile.virtualscreen.VirtualScreenStartRequest
+import io.deepseekharness.mobile.virtualscreen.VirtualScreenTargetKind
+import io.deepseekharness.mobile.virtualscreen.putVirtualScreenStart
+import org.json.JSONArray
+import org.json.JSONObject
+import rikka.shizuku.Shizuku
+import java.util.concurrent.ExecutorService
+import java.util.concurrent.Executors
+import java.util.concurrent.RejectedExecutionException
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicLong
+import java.util.concurrent.locks.ReentrantLock
+import java.io.File
+import java.io.BufferedInputStream
+import java.io.FileOutputStream
+import java.util.zip.ZipEntry
+import java.util.zip.ZipOutputStream
+import java.nio.file.FileVisitResult
+import java.nio.file.Files
+import java.nio.file.LinkOption
+import java.nio.file.SimpleFileVisitor
+import java.nio.file.StandardOpenOption
+import java.nio.file.attribute.BasicFileAttributes
+import kotlin.concurrent.withLock
+
+internal fun optionalOverlayBallEnabled(data: JSONObject): Boolean? {
+    if (!data.has("overlayBallEnabled")) return null
+    val value = data.opt("overlayBallEnabled")
+    if (value !is Boolean) throw RuntimeFailure("SETTINGS_INVALID", "悬浮球开关格式无效")
+    return value
+}
+
+/**
+ * 「打开应用时预启动服务」参数：省略 `null`，显式布尔才算修改。
+ *
+ * 与悬浮球同一条约定，理由也一样：这个开关是一次显式选择，不能让一次「只带了部分字段」
+ * 的保存把它悄悄改成关闭。非布尔直接拒绝，不猜、不转字符串。
+ */
+internal fun optionalPrewarmHarness(data: JSONObject): Boolean? {
+    if (!data.has("prewarmHarness")) return null
+    val value = data.opt("prewarmHarness")
+    if (value !is Boolean) throw RuntimeFailure("SETTINGS_INVALID", "预启动设置格式无效")
+    return value
+}
+
+/**
+ * 页面网络访问档位：省略 `null`，显式三档之一才算修改。
+ *
+ * 与悬浮球、预启动同一条约定：一次「只带了部分字段」的保存不能把用户选的档位打回默认。
+ * 未知字符串直接拒绝，不猜、不回落 —— 它会决定 WebView 放行哪些地址，静默兜底等于改权限。
+ */
+internal fun optionalPageNetworkAccess(data: JSONObject): PageNetworkAccess? {
+    if (!data.has("pageNetworkAccess")) return null
+    val value = data.opt("pageNetworkAccess")
+    if (value !is String) throw RuntimeFailure("SETTINGS_INVALID", "网络访问设置格式无效")
+    return PageNetworkAccess.parse(value) ?: throw RuntimeFailure("SETTINGS_INVALID", "网络访问设置格式无效")
+}
+
+/**
+ * 投递区导出的「指定子目录」参数。
+ *
+ * 省略、`null` 或空白一律等价于「整个工作区」；**非字符串直接拒绝**（不猜、不转字符串）。
+ * 路径本身（绝对路径、`..`、`.` 分段、超长、超深）由 `RuntimeMailboxPolicy.normalizeSubdirectory`
+ * 统一校验，这里只管类型，避免两套规则漂移。
+ */
+internal fun optionalMailboxSubdirectory(data: JSONObject): String? {
+    if (!data.has("subdirectory")) return null
+    val value = data.opt("subdirectory")
+    if (value == null || value == JSONObject.NULL) return null
+    if (value !is String) throw RuntimeFailure("MAILBOX_INPUT_INVALID", "投递区导出目标格式无效")
+    return value
+}
+
+/** 投递区根目录只允许两个固定名称；不把任意路径交给 RuntimeMailbox。 */
+internal fun requiredMailboxRoot(data: JSONObject): String {
+    val value = data.opt("root") as? String
+    if (value != "inbox" && value != "outbox") {
+        throw RuntimeFailure("MAILBOX_ROOT_INVALID", "投递区根目录无效")
+    }
+    return value
+}
+
+/** 可选的 outbox 子目录参数；类型必须是字符串，路径策略由 RuntimeMailbox 统一校验。 */
+internal fun optionalMailboxDirectory(data: JSONObject, key: String): String? {
+    if (!data.has(key)) return null
+    val value = data.opt(key)
+    if (value == null || value == JSONObject.NULL) return null
+    if (value !is String) throw RuntimeFailure("MAILBOX_PATH_INVALID", "投递区目标目录格式无效")
+    return value
+}
+
+/** 可选的共享目录 `guestPath` 参数；用于把工作区导入/导出与共享目录合并到同一套受控入口。 */
+internal fun optionalStorageGuestPath(data: JSONObject): String? {
+    if (!data.has("guestPath")) return null
+    val value = data.opt("guestPath")
+    if (value == null || value == JSONObject.NULL) return null
+    if (value !is String || value.isBlank()) {
+        throw RuntimeFailure(StorageDirCodes.PATH_INVALID, "共享目录访客路径格式无效")
+    }
+    return value
+}
+
+/** 可选的投递区根目录参数；未传时由调用方决定默认根（导入默认 inbox，导出默认 outbox）。 */
+internal fun optionalMailboxRoot(data: JSONObject): String? {
+    if (!data.has("root")) return null
+    val value = data.opt("root")
+    if (value == null || value == JSONObject.NULL) return null
+    if (value !is String || (value != "inbox" && value != "outbox")) {
+        throw RuntimeFailure("MAILBOX_ROOT_INVALID", "投递区根目录无效")
+    }
+    return value
+}
+
+/**
+ * 共享目录的 `guestPath` 参数：`/mnt/user/<序号>`（取自 [storageDirsState] 条目里的同名字段）。
+ *
+ * 这里只拒绝「缺失 / 空白 / 非字符串」，**形态与序号范围由
+ * `RuntimeStorageDirsPolicy.guestDirectoryIndex` 统一校验**（白名单里的序号语义、越界判定都只有
+ * 那一份）。错误码用共享目录这一族的 `STORAGE_DIR_PATH_INVALID`，并且不带路径。
+ */
+internal fun requiredStorageGuestPath(data: JSONObject): String {
+    val value = data.opt("guestPath") as? String
+    if (value.isNullOrBlank()) throw RuntimeFailure(StorageDirCodes.PATH_INVALID, "共享目录访客路径缺失")
+    return value
+}
+
+/**
+ * 共享目录的 `subdirectory` 参数：语义与投递区**逐字相同**（省略/空白 = 该目录本身）。
+ *
+ * 这里只做类型检查；路径规则（绝对路径、`..`、`.` 分段、超长、超深）仍旧只有
+ * `RuntimeMailboxPolicy.normalizeSubdirectory` 一份——与投递区共用实现，只有错误码族按链路分开
+ * （`MAILBOX_INPUT_INVALID` / `STORAGE_DIR_PATH_INVALID` 都是已发布的契约，不能互换）。
+ */
+internal fun optionalStorageSubdirectory(data: JSONObject): String? {
+    if (!data.has("subdirectory")) return null
+    val value = data.opt("subdirectory")
+    if (value == null || value == JSONObject.NULL) return null
+    if (value !is String) throw RuntimeFailure(StorageDirCodes.PATH_INVALID, "存储目录子路径格式无效")
+    return value
+}
+
+/**
+ * 无障碍白名单写入的可选「验证密码」参数。
+ *
+ * 省略、`null` 等价于「没带密码」（由原生侧按「是否已配置」决定放行还是拒绝）；
+ * **非字符串直接拒绝**（不猜、不转字符串）——密码是信任边界上的输入，类型模糊时宁可让用户重填。
+ * 这里只做取值与类型判断，长度/空白/控制字符的规则只有 `AccessibilityPasswordPolicy` 一份。
+ */
+internal fun optionalAccessibilityPassword(data: JSONObject, key: String): String? {
+    if (!data.has(key)) return null
+    val value = data.opt(key)
+    if (value == null || value == JSONObject.NULL) return null
+    if (value !is String) throw RuntimeFailure("ACCESSIBILITY_CONFIG_INVALID", "无障碍验证密码格式无效")
+    return value
+}
+
+/** 必填的验证密码参数：缺失、`null` 与非字符串一律按配置格式无效拒绝。 */
+internal fun requiredAccessibilityPassword(data: JSONObject, key: String): String =
+    optionalAccessibilityPassword(data, key)
+        ?: throw RuntimeFailure("ACCESSIBILITY_CONFIG_INVALID", "无障碍验证密码缺失")
+
+/** 验证密码族的受控失败 → 桥接失败码；只做转换，不另立第二套码。 */
+internal fun accessibilityGuardFailure(failure: AccessibilityGuardException): RuntimeFailure =
+    RuntimeFailure(failure.code, failure.message ?: "无障碍验证密码校验未通过")
+
+/** 前台服务通知权限别名；Android 13 以下系统不需要该权限。 */
+private const val NOTIFICATION_PERMISSION_ALIAS = "notifications"
+
+/**
+ * 国产 ROM「读取应用列表」权限的别名。
+ *
+ * 这条权限在 AOSP 上不存在，只在系统确实定义了它的 ROM（HyperOS / MagicOS /
+ * ColorOS / OriginOS 等）上申请；判定见 [AppListAccess]。
+ */
+private const val APP_LIST_PERMISSION_ALIAS = "installedApps"
+
+/*
+ * 存储权限别名。
+ * 媒体读取自 Android 13 起由 READ_MEDIA_* 取代 READ_EXTERNAL_STORAGE，两者不能塞进同一个
+ * 别名：在不适用的系统版本上 checkSelfPermission 恒为拒绝，会让状态显示永远不正确。
+ * 因此按系统版本分别声明、分别申请，状态查询也只看 API 对应的那一个。
+ */
+private const val MEDIA_IMAGES_ALIAS = "mediaImages"
+private const val MEDIA_VIDEO_ALIAS = "mediaVideo"
+private const val LEGACY_STORAGE_ALIAS = "legacyStorage"
+
+/** 系统安装器认的 APK MIME 类型；缺了它 Android 会按未知文件处理，安装界面通常打不开。 */
+private const val APP_UPDATE_MIME = "application/vnd.android.package-archive"
+
+/**
+ * `org.json.JSONObject` → Capacitor 的 `JSObject`。
+ *
+ * `runtime` 层只依赖 `org.json`（那部分要能在纯 JVM 单测里跑），桥层负责把载荷搬到
+ * Capacitor 的类型上。逐键复制而不是解析字符串：不引入可抛异常的路径，嵌套对象原样带过去。
+ */
+private fun JSONObject.toJsObject(): JSObject {
+    val result = JSObject()
+    for (key in keys()) result.put(key, get(key))
+    return result
+}
+
+/**
+ * 本进程是否已经记录过「上次非正常结束」。
+ *
+ * 每个进程只记一次：Activity 重建会重复走 load()，但「上次是怎么死的」只与进程启动有关。
+ * 放在文件级是刻意的 —— 它必须随进程重置，而 RuntimeHost 里的状态会被跨 Activity 复用。
+ */
+@Volatile
+private var uncleanExitRecorded = false
+
+@CapacitorPlugin(
+    name = "MobileRuntime",
+    permissions = [
+        Permission(
+            alias = NOTIFICATION_PERMISSION_ALIAS,
+            strings = [Manifest.permission.POST_NOTIFICATIONS],
+        ),
+        Permission(alias = MEDIA_IMAGES_ALIAS, strings = [Manifest.permission.READ_MEDIA_IMAGES]),
+        Permission(alias = MEDIA_VIDEO_ALIAS, strings = [Manifest.permission.READ_MEDIA_VIDEO]),
+        Permission(alias = LEGACY_STORAGE_ALIAS, strings = [Manifest.permission.READ_EXTERNAL_STORAGE]),
+        // 国产 ROM 的「读取应用列表」；AOSP 没有这条权限，申请前由 AppListAccess.supported 拦住。
+        Permission(alias = APP_LIST_PERMISSION_ALIAS, strings = [APP_LIST_PERMISSION]),
+    ],
+)
+class MobileRuntimePlugin : Plugin() {
+    private lateinit var controller: MobileRuntimeController
+    private lateinit var auditLog: PrivateAuditLog
+    private val executor: ExecutorService = Executors.newFixedThreadPool(4)
+    private val destroying = AtomicBoolean(false)
+    private val harnessStartScheduled = AtomicBoolean(false)
+    private val harnessStartGeneration = AtomicLong(0)
+    private val harnessOpenRequests = HarnessOpenRequests(SystemClock::elapsedRealtime)
+    private val auditedOperationLock = ReentrantLock()
+
+    private val shizukuAutoConnect = ShizukuAutoConnect(
+        executor = executor,
+        active = { !destroying.get() && ::controller.isInitialized },
+        // 自动检测不能持有运行时生命周期锁：异常的 Shizuku Binder 不得卡住 Harness 启动。
+        connect = { stillCurrent ->
+            controller.terminals.shizuku.connectIfAuthorized(permitted = { !destroying.get() }, stillCurrent = stillCurrent)
+            Unit
+        },
+    )
+    private val shizukuBinderReceivedListener = Shizuku.OnBinderReceivedListener {
+        shizukuAutoConnect.request(binderChanged = true)
+    }
+
+    /**
+     * 运行时事件出口。运行时由 [RuntimeHost] 跨插件实例持有，因此这里必须是稳定的
+     * 订阅者对象：插件销毁后取消订阅，运行时不会继续向已销毁的 WebView 派发事件。
+     */
+    private val eventSink = PluginEventSink()
+
+    /**
+     * 进行中的系统身份确认（`resetAccessibilityPasswordWithBiometric`）。
+     *
+     * 平台要求调用方保留 `BiometricPrompt` 的引用，否则提示可能被回收后回调丢失；它同时是
+     * 「上一次确认还没结束」的唯一标记（见 [clearPendingBiometricReset]）——用户连点两次时，
+     * 旧的提示会被主动取消，那次调用据实回报 `BIOMETRIC_CANCELLED`，两次点击各自结清。
+     * 只在主线程创建的提示与回调之间流转，因此用 `@Volatile` 而不是锁：读一次、判一次身份就够了。
+     */
+    @Volatile
+    private var pendingBiometricResetPrompt: BiometricPrompt? = null
+
+    /** 进行中的设备电源身份确认；与重置密码的提示分开保存，避免两次确认互相清掉引用。 */
+    @Volatile
+    private var pendingPowerPrompt: BiometricPrompt? = null
+
+    /** API 26–29 的锁屏凭据回调只能带一个 call，这里暂存本次动作类型。 */
+    @Volatile
+    private var pendingPowerAction: String? = null
+
+    /**
+     * 壳页「会话工作区」的会话元数据读取器（见 [SessionCatalog]）。
+     * 懒建：没打开过会话工作区就不付 profile 解析与脚本投放的代价。
+     */
+    private val sessionCatalog: SessionCatalog by lazy { SessionCatalog(context, controller.store) }
+
+    companion object {
+        private const val DEVICE_COMMAND_TIMEOUT_MS = 60_000L
+        // 更新链路的保序锁：频道切换、版本检查、下载、安装之间必须串行；
+        // 但慢网检查/下载是长操作，不能占用运行时启停的 auditedOperationLock——
+        // 否则用户在更新中途想重启运行时会被锁住。两把锁分离互不影响。
+        private val appUpdateOperationLock = ReentrantLock()
+        // WebView 超时不会取消原生请求，串行执行避免重试与旧写入交错。
+        private val overlayBallOperationLock = ReentrantLock(true)
+
+        /** 副屏直通 Shell 的一次性设备会话尺寸；与设备桥的默认列宽/行数保持一致。 */
+        private const val VIRTUAL_SCREEN_COLUMNS = 80
+        private const val VIRTUAL_SCREEN_ROWS = 24
+
+        /** 受控错误码：大写字母、数字与下划线，与审计日志的策略一致。 */
+        private val CONTROLLED_CODE = Regex("^[A-Z][A-Z0-9_]{0,63}$")
+
+        /** 规则标识的格式，与 `AutomationRule.validated()` 同一套口径（1~64 位字母、数字、点、下划线、连字符）。 */
+        private val AUTOMATION_RULE_ID = Regex("^[A-Za-z0-9._-]{1,64}$")
+    }
+
+    /** 权限：应用内桥接；校验语言白名单；仅返回保存结果，不返回私有配置。 */
+    @PluginMethod
+    fun setAppLanguage(call: PluginCall) {
+        val language = call.getString("language").orEmpty()
+        if (language !in AppLanguage.SUPPORTED) {
+            call.reject("不支持的应用语言", "LANGUAGE_INVALID")
+            return
+        }
+        /*
+         * 必须走 execute：这一句会落盘（`syncHarnessLocale` 里有 fsync + ATOMIC_MOVE），
+         * 而 Capacitor 的桥是单线程的——在桥线程上做 fsync，期间**所有**桥调用都在排队。
+         * 同时改用 controller 持有的那个 store：插件侧自建 RuntimeStore 会绕开
+         * lifecycleLock，与「安装/切换版本正在替换运行时根」的写操作失去互斥。
+         */
+        execute(call) {
+            try {
+                // 先持久化应用语言，再尽力同步到已安装运行时；运行时未安装时该调用为空操作。
+                val saved = AppLanguage.save(context, language) &&
+                    controller.store.syncHarnessLocale(language)
+                if (saved) {
+                    OverlayBallService.refreshAppearance()
+                    io.deepseekharness.mobile.virtualscreen.VirtualScreenService.refreshAppearance()
+                    null
+                } else throw RuntimeFailure("LANGUAGE_SAVE_FAILED", "无法保存应用语言")
+            } catch (failure: RuntimeFailure) {
+                // 受控错误码（如 LANGUAGE_INVALID / LANGUAGE_SYNC_FAILED）直接回传，便于前端区分提示。
+                throw failure
+            } catch (error: Exception) {
+                // 非受控异常不外泄原文：桥只需一个受控码，细节留给 logcat。
+                throw RuntimeFailure("LANGUAGE_SAVE_FAILED", "无法保存应用语言", error)
+            }
+        }
+    }
+
+    /**
+     * 读取应用语言的**真实来源**，供 Web 侧在 localStorage 被清空或被限制时回填。
+     *
+     * `configured=false` 表示用户从未在这里选过：此时 `language` 只是回落值（zh-CN），
+     * 不能当成「已选择」，否则首次启动的语言引导会被悄悄跳过。
+     */
+    @PluginMethod
+    fun getAppLanguage(call: PluginCall) {
+        execute(call) {
+            val saved = AppLanguage.saved(context)
+            JSObject().apply {
+                put("language", saved ?: AppLanguage.current(context))
+                put("configured", saved != null)
+            }
+        }
+    }
+
+    /**
+     * 退出应用：用于首次免责条款门禁「不同意并退出」等明确要求关闭应用的场景。
+     *
+     * 先 resolve 避免调用方 Promise 悬空或阻塞 Capacitor 串行桥，再在主线程结束并移除当前任务；
+     * 若 finishAndRemoveTask 异常，回落 finishAffinity，确保不会滞留主界面。
+     */
+    @PluginMethod
+    fun exitApp(call: PluginCall) {
+        val host = activity
+        call.resolve()
+        host?.runOnUiThread {
+            if (!host.isFinishing && !host.isDestroyed) {
+                runCatching { host.finishAndRemoveTask() }
+                    .onFailure { host.finishAffinity() }
+            }
+        }
+    }
+
+    /** 只读取应用宿主的方向；与目标应用副屏的 orientation 设置相互独立。 */
+    @PluginMethod
+    fun getAppOrientation(call: PluginCall) {
+        execute(call) { JSObject().put("mode", AppOrientationPreference.current(context)) }
+    }
+
+    @PluginMethod
+    fun setAppOrientation(call: PluginCall) {
+        val mode = call.data.opt("mode") as? String
+        if (mode == null || !AppOrientationPreference.isValid(mode)) {
+            call.reject("不支持的应用屏幕方向", "APP_ORIENTATION_INVALID")
+            return
+        }
+        val host = activity
+        if (host == null) {
+            call.reject("当前没有可用的界面，无法切换屏幕方向", "APP_ORIENTATION_UNAVAILABLE")
+            return
+        }
+        host.runOnUiThread {
+            if (host.isFinishing || host.isDestroyed || destroying.get()) {
+                call.reject("当前界面已关闭，无法切换屏幕方向", "APP_ORIENTATION_UNAVAILABLE")
+                return@runOnUiThread
+            }
+            try {
+                AppOrientationPreference.change(
+                    mode,
+                    host.requestedOrientation,
+                    apply = { host.requestedOrientation = it },
+                    persist = { AppOrientationPreference.save(context, it) },
+                )
+                call.resolve(JSObject().put("mode", mode))
+            } catch (failure: RuntimeFailure) {
+                call.reject(failure.message, failure.code)
+            } catch (_: Throwable) {
+                call.reject("无法切换应用屏幕方向", "APP_ORIENTATION_APPLY_FAILED")
+            }
+        }
+    }
+
+    /**
+     * 保存应用主题模式并把它落到当前窗口的状态栏上（登记册 5.4 的原生半边）。
+     *
+     * 为什么需要它：主题选择是 Web 侧的偏好，但**状态栏属于窗口，Web 改不了**——
+     * `meta[name=theme-color]` 只有 Chrome for Android 认，Android WebView 不认。
+     * 不接这一步，真机上选浅色主题时状态栏仍是深色。
+     *
+     * 只存 mode 不存「深/浅」：`system` 模式下系统在用户使用期间切换深色也要跟随，
+     * 存结论会把那一刻固化成显式选择。解析由 [AppThemePreference.apply] 每次按 `uiMode` 现算。
+     */
+    @PluginMethod
+    fun setAppTheme(call: PluginCall) {
+        val mode = call.getString("mode").orEmpty()
+        if (mode != AppThemePreference.MODE_SYSTEM &&
+            mode != AppThemePreference.MODE_LIGHT &&
+            mode != AppThemePreference.MODE_DARK
+        ) {
+            call.reject("不支持的主题模式", "THEME_INVALID")
+            return
+        }
+        val saved = try {
+            AppThemePreference.save(context, mode)
+        } catch (_: IllegalArgumentException) {
+            false
+        }
+        if (!saved) {
+            call.reject("无法保存主题", "THEME_SAVE_FAILED")
+            return
+        }
+        // 落盘成功后再改窗口；没有可用的 Activity（例如后台调用）不算失败，下次 onResume 会补上。
+        (activity as? android.app.Activity)?.let { AppThemePreference.applySafely(it) }
+        OverlayBallService.refreshAppearance()
+        call.resolve()
+    }
+
+    /**
+     * 把外壳主题同步给 DSH 页面（登记册 5.5）。
+     *
+     * 只接受固定字段：明暗模式、三个颜色、面板透明度。拒绝一切 CSS / JS / URL ——
+     * 这段内容最终会被拼进 `evaluateJavascript`，白名单是这里唯一的防线。
+     */
+    @PluginMethod
+    fun applyHarnessTheme(call: PluginCall) {
+        val theme = call.getObject("theme")
+        if (theme == null) {
+            call.reject("缺少主题配置", "THEME_INVALID")
+            return
+        }
+        if (!HarnessThemeBridge.save(context, theme)) {
+            call.reject("主题配置无效", "THEME_INVALID")
+            return
+        }
+        // 页面已经打开时不要求用户刷新：开关或背景改了就按新档位重放一次。
+        HarnessThemeBridge.refresh()
+        call.resolve()
+    }
+
+    /** 清除已同步的主题：DSH 页面回到它自己的默认外观。 */
+    @PluginMethod
+    fun clearHarnessTheme(call: PluginCall) {
+        if (!HarnessThemeBridge.clear(context)) {
+            call.reject("无法清除同步主题", "THEME_SAVE_FAILED")
+            return
+        }
+        HarnessThemeBridge.refresh()
+        call.resolve()
+    }
+
+    /**
+     * 「连背景一起同步」开关落盘（登记册 5.5）。
+     *
+     * 开关必须存在原生侧：外壳重启后要能读回上次的选择，只写在页面的内存状态里等于没有。
+     * 关掉时保留地址与持久授权，只停用显示——用户重新勾上不用再选一次文件。
+     */
+    @PluginMethod
+    fun setHarnessSyncBackground(call: PluginCall) {
+        val enabled = call.getBoolean("enabled")
+        if (enabled == null) {
+            call.reject("缺少背景同步开关", "THEME_INVALID")
+            return
+        }
+        if (!HarnessThemeBridge.setSyncBackground(context, enabled)) {
+            call.reject("无法保存背景同步开关", "THEME_SAVE_FAILED")
+            return
+        }
+        // 关掉后当前页面立刻清掉背景层，并收回自动播放权限。
+        HarnessThemeBridge.refresh()
+        call.resolve(JSObject().put("enabled", enabled))
+    }
+
+    /** 读回同步状态：开关、上次同步时间、已选背景（没有就是 null）。外壳启动时用它恢复界面。 */
+    @PluginMethod
+    fun harnessThemeState(call: PluginCall) {
+        call.resolve(JSObject.fromJSONObject(HarnessThemeBridge.state(context)))
+    }
+
+    /**
+     * 第二阶段：让用户挑一个背景文件，只留地址。
+     *
+     * 复制文件的上限、内存与过桥体积问题因此都不存在：视频多大都由 SAF 那边流式供给。
+     * 走 ACTION_OPEN_DOCUMENT 而不是 GET_CONTENT——只有前者能给可持久化的读授权，
+     * 应用重启后仍然解得开同一个地址。
+     */
+    @PluginMethod
+    fun pickHarnessBackground(call: PluginCall) {
+        val host = activity as? android.app.Activity
+        if (host == null) {
+            call.reject("当前没有可用的界面，无法打开文件选择器", "THEME_PICKER_UNAVAILABLE")
+            return
+        }
+        val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+            addCategory(Intent.CATEGORY_OPENABLE)
+            type = "*/*"
+            putExtra(Intent.EXTRA_MIME_TYPES, arrayOf("video/mp4", "video/webm", "image/jpeg", "image/png", "image/webp"))
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            addFlags(Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION)
+        }
+        host.runOnUiThread {
+            try {
+                startActivityForResult(call, intent, "harnessBackgroundPicked")
+            } catch (_: Throwable) {
+                call.reject("设备上没有可用的文件选择器", "THEME_PICKER_UNAVAILABLE")
+            }
+        }
+    }
+
+    /**
+     * 背景文件选择回调。
+     *
+     * 只保留地址：拿到可持久化授权后立刻写进主题目录，并把 mime / 图片或视频类型一起记下。
+     * 拿不到持久授权就如实拒绝——否则重启后地址还在、权限没了，界面会一直停在黑背景上。
+     */
+    @ActivityCallback
+    private fun harnessBackgroundPicked(call: PluginCall?, result: ActivityResult) {
+        if (call == null) return
+        val uri = result.data?.data
+        if (result.resultCode != android.app.Activity.RESULT_OK || uri == null) {
+            call.reject("已取消选择背景", "THEME_CANCELLED")
+            return
+        }
+        val resolver = context.contentResolver
+        val mime = resolver.getType(uri).orEmpty()
+        val kind = HarnessThemeBridge.kindOf(mime)
+        if (kind == null) {
+            call.reject("只支持视频或图片作为背景", "THEME_INVALID")
+            return
+        }
+        val persisted = try {
+            resolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            true
+        } catch (_: Exception) {
+            false
+        }
+        if (!persisted) {
+            call.reject("这个文件不支持长期授权，请换一个来源再试", "THEME_PERMISSION_DENIED")
+            return
+        }
+        if (!HarnessThemeBridge.setBackgroundRef(context, uri.toString(), mime)) {
+            call.reject("无法保存背景地址", "THEME_SAVE_FAILED")
+            return
+        }
+        HarnessThemeBridge.refresh()
+        call.resolve(JSObject().put("uri", uri.toString()).put("mime", mime).put("kind", kind))
+    }
+
+    @PluginMethod
+    fun clearHarnessBackground(call: PluginCall) {
+        if (!HarnessThemeBridge.clearBackground(context)) {
+            call.reject("无法清除同步背景", "THEME_SAVE_FAILED")
+            return
+        }
+        HarnessThemeBridge.refresh()
+        call.resolve()
+    }
+
+    override fun load() {
+        auditLog = PrivateAuditLog(context)
+        recordAudit(AuditEvent.PLUGIN_LOAD, AuditResult.STARTED)
+        try {
+            // 运行时由 RuntimeHost 跨插件实例持有：前台服务保留的会话在这里被复用，
+            // 不会因为 WebView 重建而重新安装或重新生成认证凭据。
+            controller = RuntimeHost.acquire(context, eventSink)
+            applyKeepScreenAwake(controller.store.keepScreenAwake())
+        } catch (error: Throwable) {
+            // 插件注册失败会让整个管理界面失去原生桥：这里必须释放已经登记的订阅，
+            // 否则 RuntimeHost 永远判不出「没有订阅者」，运行时就再也释放不掉。
+            RuntimeHost.detachPluginSink(eventSink)
+            recordAudit(AuditEvent.PLUGIN_LOAD, AuditResult.FAILED)
+            throw error
+        }
+        // 设备桥只服务设备 Shell，属于可选能力。保活生效时 Harness 进程仍在运行，
+        // 桥本应由 RuntimeHost 复用；即便这里真的失败，也绝不能让插件注册失败——
+        // 那正是「点通知后设置页打不开」的成因。
+        var bridgeReady = true
+        try {
+            ensureDeviceBridge()
+        } catch (_: Throwable) {
+            bridgeReady = false
+            android.util.Log.w("dsh-runtime", "device bridge unavailable; device shell disabled")
+        }
+        try {
+            // Binder 可能晚于 load 到达；监听只投递后台任务，不在主线程等待连接。
+            Shizuku.addBinderReceivedListenerSticky(shizukuBinderReceivedListener, Handler(Looper.getMainLooper()))
+        } catch (_: Throwable) {
+            // Shizuku 是可选能力；已就绪的 Binder 仍由下面的启动尝试覆盖。
+        }
+        shizukuAutoConnect.request()
+        // 悬浮球可以在插件加载时恢复，keep-alive 不能：后者要求运行时确实在跑，
+        // 没跑就启动只会留下一个无法解释的通知；悬浮球与运行时无关，只取决于
+        // 「用户开关 + 系统权限」（syncOverlayBallService 内部判断），所以重启应用后
+        // 必须自动把球恢复出来，否则用户强行停止后重开，球要再保存一次设置才会出现。
+        // 与设备桥同理：恢复失败（如后台启动前台服务被系统限制）不能影响插件注册，
+        // 详细结果由 syncOverlayBallService 自己记入诊断日志。
+        try {
+            syncOverlayBallService(controller.store.overlayBallEnabled())
+        } catch (_: Throwable) {
+            android.util.Log.w("dsh-runtime", "overlay ball restore failed")
+        }
+        recordAudit(AuditEvent.PLUGIN_LOAD, AuditResult.SUCCEEDED)
+        recordUncleanExitIfNeeded()
+        diagnostics()?.record(
+            DiagnosticLevel.INFO,
+            DiagnosticEvent.APP_START,
+            mapOf(
+                "result" to "ok",
+                "active" to bridgeReady.toString(),
+                "enabled" to RuntimeHost.isForegroundServiceActive().toString(),
+            ),
+        )
+    }
+
+    /**
+     * 回到前台时重新对齐悬浮球服务。
+     *
+     * 「显示在其他应用之上」是特殊权限，只能由用户到系统设置页手动开启，而且**授权不会结束进程**：
+     * 用户按界面引导去授权再返回时，插件与运行时都还活着，不会重走 [load]；前端对悬浮球状态
+     * 只读不写，也没有别的入口能把球拉起来。因此这里在主界面每次 onResume 时对齐一次，
+     * 补上「权限从已撤销恢复为已授予」的复位路径。
+     *
+     * 反向变化同样由这次对齐覆盖：权限在运行期被撤销时，同一次对齐会停掉服务并撤掉通知，
+     * 不留「球没了、通知还在」的状态。刻意不做轮询：对齐只发生在用户真正回到应用时。
+     * 与 [load] 一致，失败原因由 [syncOverlayBallService] 记入诊断日志，不阻塞界面。
+     */
+    override fun handleOnResume() {
+        super.handleOnResume()
+        if (destroying.get() || !::controller.isInitialized) return
+        shizukuAutoConnect.request()
+        try {
+            syncOverlayBallService(controller.store.overlayBallEnabled())
+        } catch (_: Throwable) {
+            android.util.Log.w("dsh-runtime", "overlay ball resume sync failed")
+        }
+    }
+
+    /**
+     * Capacitor 插件销毁（Activity 销毁，含划掉最近任务）。
+     *
+     * 这里只回收插件自己拥有的资源（线程池、发起中的设备命令）并注销事件订阅者：
+     * 运行时与设备桥都由 [RuntimeHost] 进程级持有，前台服务仍在负责时不得立即
+     * shutdown 或拆桥，否则「后台保持 Harness」会形同虚设、guest 注入的桥端口也会失效。
+     * 两者都不再持有时由 RuntimeHost 释放，语义与旧实现一致。
+     */
+    override fun handleOnDestroy() {
+        if (!destroying.compareAndSet(false, true)) return
+        harnessOpenRequests.invalidate()
+        harnessStartGeneration.incrementAndGet()
+        recordAudit(AuditEvent.PLUGIN_DESTROY, AuditResult.STARTED)
+        var result = AuditResult.SUCCEEDED
+        try {
+            Shizuku.removeBinderReceivedListener(shizukuBinderReceivedListener)
+        } catch (_: Throwable) {
+            // 可选 Binder 库失效不能阻断插件自己的资源回收。
+        }
+        try {
+            executor.shutdownNow()
+                .filterIsInstance<PluginTask>()
+                .forEach { task -> task.rejectRuntimeClosed() }
+            // 只终结本实例发起中的设备命令：发起它们的 WebView 已经不在了。
+            RuntimeHost.cancelDeviceCommands()
+        } catch (_: Throwable) {
+            result = AuditResult.FAILED
+        }
+        try {
+            // Host 只摘除所有权并把可能阻塞的 Binder/进程清理放到后台；销毁回调不能等待
+            // 终端或 Shizuku 在主线程退出，否则返回管理页会冻结数秒甚至触发 ANR。
+            RuntimeHost.detachPluginSink(eventSink)
+        } catch (_: Throwable) {
+            result = AuditResult.FAILED
+            // 销毁流程继续；不记录终端数据或进程细节。
+        } finally {
+            try {
+                super.handleOnDestroy()
+            } catch (error: Throwable) {
+                result = AuditResult.FAILED
+                throw error
+            } finally {
+                recordAudit(AuditEvent.PLUGIN_DESTROY, result)
+                // 记录销毁结果与此刻运行时是否仍被前台服务保留：这正是排查
+                // 「划掉最近任务后运行时是否还在」时需要的第一手信息。
+                diagnostics()?.record(
+                    DiagnosticLevel.INFO,
+                    DiagnosticEvent.APP_DESTROY,
+                    mapOf(
+                        "result" to result.name.lowercase(),
+                        "active" to RuntimeHost.isForegroundServiceActive().toString(),
+                    ),
+                )
+            }
+        }
+    }
+
+    /**
+     * 权限：应用私有桥接；白名单操作、包名与条目标识校验；只返回插件元数据。
+     *
+     * `repair` 是唯一会改动运行时链接的只读形态操作（受控重试），因此单列一个审计事件：
+     * 自愈触发不经过桥接、也不进审计，审计日志里出现 `PLUGIN_REPAIR` 就代表**用户手动点过修复**。
+     */
+    @PluginMethod
+    fun managePlugins(call: PluginCall) {
+        execute(call) {
+            val operation = call.getString("operation").orEmpty()
+            val event = when (operation) {
+                "list" -> AuditEvent.PLUGIN_LIST
+                "enable", "child", "disable" -> AuditEvent.PLUGIN_ENABLE
+                "update" -> AuditEvent.PLUGIN_UPDATE
+                "import" -> AuditEvent.PLUGIN_IMPORT
+                "rollback" -> AuditEvent.PLUGIN_ROLLBACK
+                "repair" -> AuditEvent.PLUGIN_REPAIR
+                "prune" -> AuditEvent.PLUGIN_PRUNE
+                else -> throw RuntimeFailure("PLUGIN_INPUT_INVALID", "插件操作无效")
+            }
+            audited(event) {
+                // 来源地址只在这一次调用里透传，既不进审计也不出现在返回值中。
+                controller.managePlugins(
+                    operation,
+                    call.getString("id"),
+                    call.getBoolean("enabled"),
+                    call.getString("childId"),
+                    call.getString("source"),
+                )
+            }
+        }
+    }
+
+    /**
+     * 权限：应用内桥接。
+     * 运行时自检：`check` 只读（可用空间、dsh 版本、WebView 版本与十八项检查 —— 访客脚本产出 14 项：
+     * 前 11 项是冻结契约，后 3 项 `c_compiler`/`make`/`python3` 是编译环境能力项，只报 warn、不进失败判定；
+     * 宿主再追加 4 项设备事实：`plugins`/`accessibility`/`virtualscreen`/`webview`，同样只读），
+     * `repair` 只补可执行位并创建附件目录 —— **不新增任何副作用**，不动插件链接、无障碍与权限。
+     * 只回传受控枚举与计数，不含路径、文件内容或原始报错文本。
+     */
+    @PluginMethod
+    fun runRuntimeSelfCheck(call: PluginCall) {
+        execute(call) {
+            val operation = RuntimeSelfCheckPolicy.operation(call.getString("operation"))
+                ?: throw RuntimeFailure("SELF_CHECK_INPUT_INVALID", "自检操作无效")
+            requireSelfCheck(operation)
+        }
+    }
+
+    @PluginMethod
+    fun getState(call: PluginCall) {
+        resolveWhileActive(call) { controller.state().toJs() }
+    }
+
+    /**
+     * 权限：应用内桥接。
+     * 运行时版本列表：只回传槽位、版本号、dsh 版本、体积与可用操作，不含路径或下载地址。
+     */
+    @PluginMethod
+    fun runtimeVersions(call: PluginCall) {
+        // 需要拿 lifecycleLock（与启停/安装共用），不能占着串行桥线程等它。
+        execute(call) { controller.runtimeVersions().toJs() }
+    }
+
+    /**
+     * 权限：应用内桥接。
+     * 远端可安装的运行时版本：只回传版本号、dsh 版本与清单地址/摘要，不含 rootfs 地址或凭据。
+     *
+     * 要下载并校验每个版本的清单，所以放在后台执行器上。目录取不到时以 [RuntimeFailure] 明确失败，
+     * 不会用空列表冒充「没有可用版本」——那会让界面把一次失败显示成一个查过的事实。
+     */
+    @PluginMethod
+    fun listRuntimeReleases(call: PluginCall) {
+        execute(call) { JSObject().put("entries", RuntimeReleaseCatalog().list()) }
+    }
+
+    /** 应用内桥权限；目录来自固定 npm registry，只返回版本与受控标签。 */
+    @PluginMethod
+    fun listHarnessReleases(call: PluginCall) {
+        execute(call) {
+            JSObject().put("entries", org.json.JSONArray(io.deepseekharness.mobile.runtime.HarnessPackageCatalog.list().map { it.toJson() }))
+        }
+    }
+
+    /** 应用内桥权限；操作白名单与精确版本号由控制器复核，不回传路径、凭据或 npm 原始输出。 */
+    @PluginMethod
+    fun manageHarnessVersions(call: PluginCall) {
+        execute(call) {
+            val operation = call.getString("operation") ?: ""
+            if (operation == "list") JSObject(controller.manageHarnessVersions(operation, null).toString())
+            else audited(when (operation) {
+                "install" -> AuditEvent.RUNTIME_INSTALL
+                "select" -> AuditEvent.RUNTIME_VERSION_SWITCH
+                "delete" -> AuditEvent.RUNTIME_VERSION_DELETE
+                else -> throw RuntimeFailure("HARNESS_VERSION_INVALID", "Harness 版本操作无效")
+            }) { JSObject(controller.manageHarnessVersions(operation, call.getString("version")).toString()) }
+        }
+    }
+
+    /**
+     * 权限：应用内桥接。
+     * 下载远端运行时包到本地版本库（不立即激活）。
+     */
+    @PluginMethod
+    fun downloadRuntimeRelease(call: PluginCall) {
+        execute(call) {
+            audited(AuditEvent.RUNTIME_INSTALL) {
+                val url = call.getString("manifestUrl")
+                val sha = call.getString("manifestSha256")
+                val source = RuntimeValidation.source(url, sha)
+                controller.downloadToLibrary(source)
+                JSObject().put("success", true)
+            }
+        }
+    }
+
+    /**
+     * 权限：应用内桥接。
+     * 切换运行时版本：目前只支持切回保留下来的上一版本（`target = "previous"`）。
+     */
+    @PluginMethod
+    fun switchRuntimeVersion(call: PluginCall) {
+        execute(call) {
+            audited(AuditEvent.RUNTIME_VERSION_SWITCH) {
+                controller.switchRuntimeVersion(RuntimeVersionPolicy.requireTarget(call.getString("target"))).toJs()
+            }
+        }
+    }
+
+    /**
+     * 权限：应用内桥接。
+     * 删除保留下来的上一版本：只删 `retained*`，当前运行时不受影响。
+     */
+    @PluginMethod
+    fun deleteRuntimeVersion(call: PluginCall) {
+        execute(call) {
+            audited(AuditEvent.RUNTIME_VERSION_DELETE) {
+                controller.deleteRuntimeVersion(RuntimeVersionPolicy.requireTarget(call.getString("target"))).toJs()
+            }
+        }
+    }
+
+    /**
+     * 权限：应用内桥接。
+     * 锁定/解锁版本库里的一个已下载版本：被锁定的版本不会被「版本库满额时自动淘汰」挑走。
+     *
+     * 只接受版本库条目 ID：当前/上一/内置槽位不是淘汰对象，锁它们没有任何意义。
+     */
+    @PluginMethod
+    fun setRuntimeVersionPinned(call: PluginCall) {
+        execute(call) {
+            audited(AuditEvent.RUNTIME_VERSION_PIN) {
+                val target = RuntimeVersionPolicy.requireTarget(call.getString("target"))
+                val pinned = call.getBoolean("pinned") ?: throw RuntimeFailure("RUNTIME_VERSION_INPUT_INVALID", "锁定状态无效")
+                controller.setRuntimeVersionPinned(target, pinned).toJs()
+            }
+        }
+    }
+
+    /**
+     * 权限：应用内桥接。
+     * 纯本地应用更新状态（绝不联网、不抢占远端更新锁）：立即回传本机已装版本、安装权限、
+     * 已持久化频道及同版本同频道的有效缓存（若有）。用于版本管理页首帧与离线降级，
+     * 避免应用更新后缓存失效或 GitHub 波动时把「接收测试版本」开关回弹关闭并锁死。
+     */
+    @PluginMethod
+    fun getAppUpdateLocalState(call: PluginCall) {
+        execute(call) {
+            AppUpdateCache.from(context).localState(
+                AppReleaseCatalog.installed(context),
+                AppReleaseCatalog.installAllowed(context),
+                AppUpdateChannel.load(context),
+            ).toJsObject()
+        }
+    }
+
+    /**
+     * 权限：应用内桥接。
+     * 应用自身更新状态：本机已安装版本、是否已授权安装未知应用，以及**严格更新**时才出现的 available。
+     *
+     * 默认读取有效缓存；调用方可显式传 true 检查远端最新版。
+     * 没有更新时 available 键缺失，
+     * cached / checkedAt 说明元数据来源；channel 是当前生效的更新频道（stable / beta），
+     * 界面据此渲染「接收测试版本」开关；本机版本和安装权限始终实时读取，不回传下载地址。
+     *
+     * 只读元数据查询走 [AppUpdateCache] 内部 `inFlight` 按 `(installed, channel)` 去重，
+     * 不再占用 [appUpdateOperationLock]，避免开机每日提醒与版本页/频道切换互相阻塞。
+     */
+    @PluginMethod
+    fun getAppUpdateState(call: PluginCall) {
+        execute(call) {
+            auditedUnlocked(AuditEvent.APP_UPDATE) {
+                val forceRefresh = if (call.data.has("forceRefresh")) {
+                    call.data.opt("forceRefresh") as? Boolean
+                        ?: throw RuntimeFailure("APP_UPDATE_INPUT_INVALID", "更新检查参数无效")
+                } else false
+                AppUpdateCache.from(context).state(
+                    AppReleaseCatalog.installed(context),
+                    AppReleaseCatalog.installAllowed(context),
+                    AppUpdateChannel.load(context),
+                    forceRefresh,
+                ).toJsObject()
+            }
+        }
+    }
+
+    /**
+     * 权限：应用内桥接。
+     * 切换应用更新频道（stable / beta）：频道持久化在原生 SharedPreferences + 文件副本，前端不存、不传参。
+     *
+     * 频道决定下载哪个 APK，与「目录与地址由原生自己决定」是同一条安全边界。
+     * **先同步落盘频道选择**，再以 `forceRefresh = true` 拉取目标频道候选：
+     * - 联网成功：返回新频道完整 state；
+     * - 联网失败：不丢弃已保存的频道，返回新频道的本地态（`refreshFailed = true`，不带旧频道 `available`，
+     *   因此既不会按旧频道误下载，也不会把开关回弹锁死）。
+     */
+    @PluginMethod
+    fun setAppUpdateChannel(call: PluginCall) {
+        execute(call) {
+            audited(AuditEvent.APP_UPDATE, appUpdateOperationLock) {
+                val channel = AppUpdateChannel.fromId(call.data.opt("channel") as? String)
+                    ?: throw RuntimeFailure("APP_UPDATE_INPUT_INVALID", "更新频道参数无效")
+                AppUpdateChannel.save(context, channel)
+                val installed = AppReleaseCatalog.installed(context)
+                val installAllowed = AppReleaseCatalog.installAllowed(context)
+                val cache = AppUpdateCache.from(context)
+                try {
+                    cache.state(installed, installAllowed, channel, forceRefresh = true).toJsObject()
+                } catch (_: RuntimeFailure) {
+                    cache.localState(installed, installAllowed, channel, refreshFailed = true).toJsObject()
+                }
+            }
+        }
+    }
+
+    /**
+     * 权限：应用内桥接。
+     * 下载应用更新包到应用私有目录；频道与地址由原生自己决定，前端**不能**传任意 URL。
+     *
+     * 先落到 `.part`，摘要核对通过后才改名成正式安装包，所以目录里存在的 `.apk` 一定是完整的包。
+     * 下载过程中从 `appUpdateProgress` 推送字节数（按 [AppUpdateProgressThrottle] 节流），
+     * 界面据此画进度条；下载结束（成功或失败）不再补发事件，界面以这次调用的结果为准。
+     */
+    @PluginMethod
+    fun downloadAppUpdate(call: PluginCall) {
+        execute(call) {
+            audited(AuditEvent.APP_UPDATE, appUpdateOperationLock) {
+                val release = requireAppUpdate()
+                val target = AppUpdateStorage.partialFile(context.cacheDir, release.version)
+                val throttle = AppUpdateProgressThrottle(release.bytes)
+                try {
+                    RuntimeHttp().downloadFile(
+                        RuntimeValidation.requireHttpsUri(release.url, rejectPrivateHost = true),
+                        target,
+                        release.bytes,
+                        release.sha256,
+                    ) { downloaded, total ->
+                        if (throttle.shouldReport(downloaded) && !destroying.get()) {
+                            notifyListeners(
+                                "appUpdateProgress",
+                                JSObject().put("downloadedBytes", downloaded).put("totalBytes", total),
+                            )
+                        }
+                    }
+                } catch (failure: RuntimeFailure) {
+                    throw appUpdateDownloadFailure(failure)
+                }
+                AppUpdateStorage.commit(context.cacheDir, release.version)
+                null
+            }
+        }
+    }
+
+    /**
+     * 权限：应用内桥接。
+     * 调起系统安装器安装当前频道的更新包；版本、长度和摘要必须匹配当前发布信息。
+     *
+     * Android **不允许**应用静默安装：这里只把文件交给系统安装器，是否安装、装的是哪个包，
+     * 都要用户在系统界面上确认一次。未授权安装未知应用时抛 `APP_UPDATE_INSTALL_PERMISSION`，
+     * 界面据此引导用户去 [openAppUpdateInstallSettings]。
+     */
+    @PluginMethod
+    fun installAppUpdate(call: PluginCall) {
+        execute(call) {
+            audited(AuditEvent.APP_UPDATE, appUpdateOperationLock) {
+                val release = requireAppUpdate()
+                val apk = AppUpdateInstallPolicy.requireInstallable(
+                    AppReleaseCatalog.installAllowed(context),
+                    AppUpdateStorage.downloaded(context.cacheDir, release.version),
+                    release,
+                )
+                val uri = try {
+                    // authority 与 AndroidManifest 里的 ${applicationId}.appupdates 一致，
+                    // 路径白名单见 res/xml/app_update_paths.xml（只暴露 app-updates/）。
+                    FileProvider.getUriForFile(context, "${context.packageName}.appupdates", apk)
+                } catch (error: Throwable) {
+                    throw RuntimeFailure("APP_UPDATE_SHARE_FAILED", "无法把安装包交给系统安装器", error)
+                }
+                val intent = Intent(Intent.ACTION_VIEW)
+                    .setDataAndType(uri, APP_UPDATE_MIME)
+                    .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                try {
+                    context.startActivity(intent)
+                } catch (error: Throwable) {
+                    throw RuntimeFailure("APP_UPDATE_INSTALL_UNAVAILABLE", "无法打开系统安装器", error)
+                }
+                null
+            }
+        }
+    }
+
+    /**
+     * 权限：应用内桥接。
+     * 打开「安装未知应用」授权页：这是每个应用一个开关的系统权限，只能由用户手动开启，
+     * 不会弹运行时对话框，也不该由应用替用户打开。
+     */
+    @PluginMethod
+    fun openAppUpdateInstallSettings(call: PluginCall) {
+        execute(call) {
+            audited(AuditEvent.APP_UPDATE, appUpdateOperationLock) {
+                val packageUri = Uri.parse("package:${context.packageName}")
+                try {
+                    context.startActivity(
+                        Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, packageUri)
+                            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+                    )
+                } catch (_: Throwable) {
+                    // 个别 ROM 没有这一页：退回应用详情页，用户在那里仍能找到权限入口。
+                    try {
+                        context.startActivity(
+                            Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, packageUri)
+                                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+                        )
+                    } catch (error: Throwable) {
+                        throw RuntimeFailure("APP_UPDATE_SETTINGS_UNAVAILABLE", "无法打开安装授权设置页", error)
+                    }
+                }
+                null
+            }
+        }
+    }
+
+    /**
+     * 只读取「安装未知应用」开关，不触发联网更新检查或打开系统页面。
+     *
+     * 首次权限说明需要在离线时也能准确展示状态，因此不能复用
+     * [getAppUpdateState]（没有有效缓存时它可能检查远端发布）。
+     */
+    @PluginMethod
+    fun getAppUpdateInstallPermission(call: PluginCall) {
+        execute(call) {
+            JSObject().put("granted", AppReleaseCatalog.installAllowed(context))
+        }
+    }
+
+    /** 与展示复用同一受校验缓存；桥层不暴露 URL，没有更新时明确失败。 */
+    private fun requireAppUpdate(): AppReleaseCatalog.Release =
+        AppUpdateCache.from(context).availableRelease(
+            AppReleaseCatalog.installed(context),
+            AppUpdateChannel.load(context),
+        ) ?: throw RuntimeFailure("APP_UPDATE_UNAVAILABLE", "当前没有可用的应用更新")
+
+    /**
+     * 下载层用的是运行时归档的失败码与文案，这里翻译成应用更新的说法。
+     * 错误码仍是受控的大写下划线形态，可以直接作为审计详情。
+     */
+    private fun appUpdateDownloadFailure(failure: RuntimeFailure): RuntimeFailure = when (failure.code) {
+        "ROOTFS_DIGEST_MISMATCH" ->
+            RuntimeFailure("APP_UPDATE_DIGEST_MISMATCH", "更新安装包摘要校验失败，请重新下载", failure)
+
+        "MANIFEST_SIZE_INVALID" -> RuntimeFailure("APP_UPDATE_SIZE_INVALID", "更新安装包大小无效", failure)
+        "DOWNLOAD_INCOMPLETE" -> RuntimeFailure("DOWNLOAD_INCOMPLETE", "更新安装包下载未完成，请重试", failure)
+        else -> failure
+    }
+
+    @PluginMethod
+    fun getSettings(call: PluginCall) {
+        resolveWhileActive(call) { controller.store.settings().toJs() }
+    }
+
+    @PluginMethod
+    fun saveSettings(call: PluginCall) {
+        execute(call) {
+            val fontSize = call.getInt("terminalFontSize")
+                ?: throw RuntimeFailure("SETTINGS_INVALID", "终端字号缺失")
+            val providerApiKeyUpdates = RuntimeValidation.providerApiKeyUpdates(call.getObject("providerApiKeys"))
+                .toMutableMap()
+            call.getString("apiKey")?.trim()?.takeIf { it.isNotEmpty() }?.let { legacyKey ->
+                providerApiKeyUpdates.putIfAbsent(
+                    io.deepseekharness.mobile.runtime.ModelProvider.DEEPSEEK,
+                    RuntimeValidation.requireProviderApiKey(legacyKey),
+                )
+            }
+            val clearedProviderApiKeys = RuntimeValidation.clearedProviderApiKeys(call.getArray("clearProviderApiKeys"))
+            val customProviders = RuntimeValidation.customModelProviders(call.getArray("customModelProviders"))
+            val allowedCustomIds = customProviders.mapTo(linkedSetOf()) { it.id }
+            val customProviderApiKeyUpdates = RuntimeValidation.customProviderApiKeyUpdates(
+                call.getObject("customProviderApiKeys"),
+                allowedCustomIds,
+            )
+            val clearedCustomProviderApiKeys = RuntimeValidation.clearedCustomProviderApiKeys(
+                call.getArray("clearCustomProviderApiKeys"),
+                allowedCustomIds,
+            )
+            val overlayBallEnabledUpdate = optionalOverlayBallEnabled(call.data)
+            // 字段缺失 = 这次保存不碰默认模型记录；显式空对象 = 用户清掉了最后一条。
+            val defaultModels = call.getObject("defaultModels")?.let(RuntimeValidation::defaultModelIds)
+            val prewarmHarnessUpdate = optionalPrewarmHarness(call.data)
+            val pageNetworkAccessUpdate = optionalPageNetworkAccess(call.data)
+            val settings = RuntimeValidation.settings(
+                call.getString("manifestUrl"),
+                call.getString("manifestSha256"),
+                call.getBoolean("keepScreenAwake", false) ?: false,
+                fontSize,
+                call.getBoolean("keepRuntimeInBackground", false) ?: false,
+                // 省略值只作为构造设置对象时的占位；是否写入由下面的可空更新参数决定。
+                overlayBallEnabledUpdate ?: false,
+                // 同上：占位值不参与写入，省略时保留原生侧已有选择。
+                prewarmHarnessUpdate ?: false,
+                // 同上：省略时保留原生侧已有档位。
+                pageNetworkAccessUpdate ?: PageNetworkAccess.APP,
+            )
+            val saved = controller.saveSettings(
+                settings,
+                providerApiKeyUpdates,
+                clearedProviderApiKeys,
+                customProviders,
+                customProviderApiKeyUpdates,
+                clearedCustomProviderApiKeys,
+                overlayBallEnabledUpdate = overlayBallEnabledUpdate,
+                defaultModels = defaultModels,
+                prewarmHarnessUpdate = prewarmHarnessUpdate,
+                pageNetworkAccessUpdate = pageNetworkAccessUpdate,
+            )
+            applyKeepScreenAwake(saved.keepScreenAwake)
+            syncKeepAliveService(saved.keepRuntimeInBackground)
+            // 菜单可能与本次保存并发关闭悬浮球；服务启停以同步瞬间的单字段真值为准。
+            syncOverlayBallService(controller.store.overlayBallEnabled())
+            saved.toJs()
+        }
+    }
+
+    @PluginMethod
+    fun install(call: PluginCall) {
+        execute(call) {
+            audited(AuditEvent.RUNTIME_INSTALL) {
+                val settings = controller.store.settings()
+                val libraryId = call.getString("libraryId")
+                val source = if (!libraryId.isNullOrBlank()) {
+                    RuntimeSource(null, null, libraryId = RuntimeLibrary.requireId(libraryId.trim()))
+                } else {
+                    RuntimeValidation.source(
+                        call.getString("manifestUrl") ?: settings.manifestUrl,
+                        call.getString("manifestSha256") ?: settings.manifestSha256,
+                    )
+                }
+                // 安装前已自动拍下会话快照（controller.install 内，与手动快照同一套实现）。
+                // 快照结论单独记一条审计与诊断：安装本身照旧成功，但用户必须能看出这次有没有备份。
+                val autoSnapshot = controller.install(source)
+                recordAutoSnapshotAudit(autoSnapshot)
+                JSObject().put("autoSnapshot", autoSnapshot.toJs())
+            }
+        }
+    }
+
+    @PluginMethod
+    fun repairRuntime(call: PluginCall) {
+        execute(call) {
+            audited(AuditEvent.RUNTIME_INSTALL) {
+                val autoSnapshot = controller.repairRuntime()
+                recordAutoSnapshotAudit(autoSnapshot)
+                JSObject().put("autoSnapshot", autoSnapshot.toJs())
+            }
+        }
+    }
+
+    @PluginMethod
+    fun startHarness(call: PluginCall) {
+        if (!harnessStartScheduled.compareAndSet(false, true)) {
+            resolveWhileActive(call) { controller.state().toJs() }
+            return
+        }
+        val generation = harnessStartGeneration.get()
+        val accepted = execute(call) {
+            /*
+             * 启动耗时从「接单」开始算，而不是从 `controller.startHarness()` 开始：
+             * 用户体感的是「点了按钮到能用」，中间还夹着设备桥检查与语言重放，
+             * 只测内核那段会把真实等待算少，优化就会盯着错的地方。
+             */
+            val startWatch = SystemClock.elapsedRealtime()
+            val elapsedMillis = { SystemClock.elapsedRealtime() - startWatch }
+            try {
+                audited(AuditEvent.RUNTIME_START) {
+                    if (generation != harnessStartGeneration.get()) return@audited controller.state().toJs()
+                    ensureDeviceBridge()
+                    // 应用语言可能在运行时创建 settings 文件之前就已选择，每次启动 Harness 前重放一次。
+                    controller.store.syncHarnessLocale(AppLanguage.current(context))
+                    try {
+                        controller.startHarness().toJs().also { snapshot ->
+                            // Harness 启动成功后才按设置提升前台优先级；失败时不留空转服务。
+                            // 这里直接读开关，避免为读设置而触发凭据解密。
+                            syncKeepAliveService(controller.store.keepRuntimeInBackground())
+                            diagnostics()?.record(
+                                DiagnosticLevel.INFO,
+                                DiagnosticEvent.HARNESS_START,
+                                mapOf(
+                                    "result" to "ok",
+                                    "phase" to snapshot.optString("phase"),
+                                    // 唯一的启动耗时客观口径：0 表示「没走到内核那段」，正常启动不会是 0。
+                                    "elapsed_ms" to elapsedMillis().toString(),
+                                ),
+                            )
+                        }
+                    } catch (failure: Throwable) {
+                        // 启动失败码是排障的核心线索：它是受控枚举，不含任何凭据或路径。
+                        // 失败也记耗时：120 秒超时与 200 毫秒就失败是两种完全不同的故障，
+                        // 只看失败码会把它们混成同一类。
+                        diagnostics()?.record(
+                            DiagnosticLevel.ERROR,
+                            DiagnosticEvent.HARNESS_START,
+                            mapOf(
+                                "result" to "failed",
+                                "code" to failureCode(failure),
+                                "elapsed_ms" to elapsedMillis().toString(),
+                            ),
+                        )
+                        throw failure
+                    }
+                }
+            } finally {
+                harnessStartScheduled.set(false)
+            }
+        }
+        if (!accepted) harnessStartScheduled.set(false)
+    }
+
+    @PluginMethod
+    fun openHarness(call: PluginCall) {
+        val request = harnessOpenRequests.accept()
+        // 获取运行时访问凭据会等待生命周期锁，不能阻塞 Capacitor 的串行桥接线程。
+        execute(call) {
+            // 打开前再跑一次 Shizuku 自动检测：应用可能刚经历过进程/运行环境重启，
+            // 只在 load/resume 时尝试会留下「已授权但未连接」的空窗，设备工具随即可用。
+            shizukuAutoConnect.request()
+            val sessionId = try {
+                HarnessPageUrl.requireValidSessionId(call.getString("sessionId")?.trim())
+            } catch (_: IllegalArgumentException) {
+                throw RuntimeFailure("SESSION_ID_INVALID", "会话标识格式无效")
+            }
+            val intent = Intent(context, HarnessActivity::class.java)
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_REORDER_TO_FRONT or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+            if (sessionId != null) {
+                intent.putExtra(HarnessActivity.EXTRA_SESSION_ID, sessionId)
+            } else {
+                intent.putExtra(HarnessActivity.EXTRA_RESET_TO_HOME, true)
+            }
+            // access 阶段只读；真正授权放在 HarnessOpenRequests 的最终派发门内，
+            // 这样取消/超时不会先把旧凭据发布到 AppAuthenticationState。
+            harnessOpenRequests.launch(request, controller::openHarnessAccess) { access ->
+                var authorization: AppAuthenticationState.HarnessAuthorization? = null
+                try {
+                    ensurePluginActive()
+                    authorization = controller.authorizeHarnessAccess(access) { harnessOpenRequests.commit(request) }
+                    if (!harnessOpenRequests.isCurrent(request)) {
+                        throw RuntimeFailure("HARNESS_OPEN_CANCELLED", "打开请求已取消")
+                    }
+                    context.startActivity(intent)
+                } catch (error: Throwable) {
+                    authorization?.let { AppAuthenticationState.revokeHarness(it) }
+                    throw error
+                }
+            }
+            null
+        }
+    }
+
+    /**
+     * 把当前 Harness 交给外置浏览器（完整能力，不是只读预览）。
+     *
+     * URL 带两枚本次运行周期的临时令牌：浏览器专用令牌负责通过应用预载的门，dsh 自己的
+     * 启动令牌负责通过 dsh 的浏览器认证门；Basic 密码绝不进入 URL。预载校验前一枚后把
+     * 两者同时删除并经 302 换成 HttpOnly Cookie，历史里只留下 `/`。dsh 令牌直接来自已经
+     * 校验过的启动 URL，不能依赖预载从 stdout 猜测。回环地址让它出了设备即作废；没有令牌的
+     * 同机请求仍然进不来。浏览器里点开的链接与网站由用户自行判断。
+     */
+    @PluginMethod
+    fun openHarnessExternal(call: PluginCall) {
+        execute(call) {
+            // 与外置浏览器同理：用户可能只从设置页进入外置浏览器，resume 回调来不及覆盖
+            // 刚刚失效的 Shizuku 连接；打开动作本身再触发一次后台自动连接。
+            shizukuAutoConnect.request()
+            val access = controller.openHarnessAccess()
+            val browserToken = access.browserToken
+                ?: throw RuntimeFailure("HARNESS_BROWSER_HANDOFF_UNAVAILABLE", "当前运行周期不支持外置浏览器打开")
+            // 前端在会话切换时把 `dsh.sessions.current` 镜像到这条 Cookie；外置浏览器与
+            // WebView 不共享 localStorage，只能靠它把「当前会话」带过去。
+            val lastSession = runCatching {
+                android.webkit.CookieManager.getInstance().getCookie(access.url)
+            }.getOrNull().let(HarnessWebAuth::sessionFromCookieHeader)
+            val uri = HarnessWebAuth.browserLaunchUrl(access.url, browserToken, lastSession)
+                ?: throw RuntimeFailure("HARNESS_BROWSER_HANDOFF_INVALID", "外置浏览器入口地址无效")
+            val target = Intent(Intent.ACTION_VIEW, Uri.parse(uri.toASCIIString()))
+                .addCategory(Intent.CATEGORY_BROWSABLE)
+            // 用户固定过浏览器且它仍然可用时直接用它打开；没选过、已卸载或启动失败时
+            // 退回系统选择器，不让一个过期的偏好挡住入口。
+            val chosen = ExternalBrowsers.select(context, controller.store.externalBrowserPackage())
+            ExternalBrowsers.openTarget(
+                chosenPackage = chosen?.packageName,
+                openWithPackage = { packageName ->
+                    context.startActivity(
+                        Intent(target).setPackage(packageName).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+                    )
+                },
+                openWithChooser = {
+                    // 交给系统选择器：用哪个浏览器打开由用户决定。选择器本身不需要 NEW_TASK，
+                    // 目标 Activity 由系统在应用任务栈里启动。
+                    try {
+                        context.startActivity(
+                            Intent.createChooser(target, "选择浏览器打开 Harness").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+                        )
+                    } catch (_: android.content.ActivityNotFoundException) {
+                        throw RuntimeFailure("HARNESS_BROWSER_UNAVAILABLE", "没有可用的浏览器")
+                    }
+                },
+            )
+            null
+        }
+    }
+    @PluginMethod
+    fun testModelConnectivity(call: PluginCall) {
+        val providerId = call.getString("providerId")?.trim() ?: run {
+            call.reject("供应商标识缺失")
+            return
+        }
+        try {
+            RuntimeValidation.requireModelProviderId(providerId)
+        } catch (error: RuntimeFailure) {
+            call.reject(error.message ?: "供应商标识格式无效")
+            return
+        }
+        val baseUrl = call.getString("baseUrl")?.trim()
+        val apiKey = call.getString("apiKey")?.trim()
+        val api = call.getString("api")?.trim()
+        execute(call) {
+            val customProvider = controller.store.settings().customModelProviders
+                .firstOrNull { it.id == providerId }
+            // A blank key means "keep the saved credential"; the user is still explicitly
+            // choosing the endpoint and protocol in the current form.
+            val savedKey = controller.store.readModelCredential(providerId)
+            // A blank draft key may reuse the saved credential, but the endpoint and
+            // protocol must still come from the current form. Otherwise editing a
+            // provider and testing it silently probes the old saved endpoint.
+            val effectiveBaseUrl = draftOrSavedBaseUrl(baseUrl, customProvider)
+            val effectiveApi = draftOrSavedApi(api, customProvider)
+            val result = ModelConnectivityProbe.probe(
+                providerId = providerId,
+                baseUrl = effectiveBaseUrl,
+                apiKey = apiKey,
+                api = effectiveApi,
+                savedApiKey = savedKey,
+            )
+            JSObject().apply {
+                put("ok", result.ok)
+                put("status", result.status)
+                put("latencyMs", result.latencyMs)
+                put("message", result.message)
+            }
+        }
+    }
+
+    /**
+     * 读取供应商上游的可用模型列表（与 [testModelConnectivity] 探测同一个 `/models` 端点）。
+     *
+     * 密钥解析规则与连通性测试**完全一致**：草稿 URL/API 始终优先，API Key 留空时才回落到
+     * 已保存密钥。这样修改地址后不会静默请求旧端点；用户仍须明确把密钥发送到当前草稿地址。
+     */
+    @PluginMethod
+    fun listModelCatalog(call: PluginCall) {
+        val providerId = call.getString("providerId")?.trim() ?: run {
+            call.reject("供应商标识缺失")
+            return
+        }
+        try {
+            RuntimeValidation.requireModelProviderId(providerId)
+        } catch (error: RuntimeFailure) {
+            call.reject(error.message ?: "供应商标识格式无效")
+            return
+        }
+        val baseUrl = call.getString("baseUrl")?.trim()
+        val apiKey = call.getString("apiKey")?.trim()
+        val api = call.getString("api")?.trim()
+        execute(call) {
+            val customProvider = controller.store.settings().customModelProviders
+                .firstOrNull { it.id == providerId }
+            val savedKey = controller.store.readModelCredential(providerId)
+            val effectiveBaseUrl = draftOrSavedBaseUrl(baseUrl, customProvider)
+            val effectiveApi = draftOrSavedApi(api, customProvider)
+            val result = ModelCatalogProbe.list(
+                providerId = providerId,
+                baseUrl = effectiveBaseUrl,
+                apiKey = apiKey,
+                api = effectiveApi,
+                savedApiKey = savedKey,
+            )
+            JSObject().apply {
+                put("ok", result.ok)
+                put("status", result.status)
+                put("latencyMs", result.latencyMs)
+                put("message", result.message)
+                val models = JSONArray()
+                result.models.forEach { model ->
+                    models.put(
+                        JSObject().apply {
+                            put("id", model.id)
+                            put("name", model.name)
+                        },
+                    )
+                }
+                put("models", models)
+            }
+        }
+    }
+
+    @PluginMethod
+    fun stopRuntime(call: PluginCall) {
+        harnessOpenRequests.invalidate()
+        harnessStartGeneration.incrementAndGet()
+        requestHarnessStartCancellation()
+        stopKeepAliveService()
+        execute(call) {
+            audited(AuditEvent.RUNTIME_STOP) {
+                // 设备桥是进程级资源：停止 Harness 不等于释放运行时，桥必须留着，
+                // 否则 supervisor 里保存的端口与令牌会变成指向死端口的陈旧配置。
+                // 只终结发起中的设备命令——它们的终端会话即将被关闭。
+                RuntimeHost.cancelDeviceCommands()
+                controller.stopRuntime().toJs().also { snapshot ->
+                    diagnostics()?.record(
+                        DiagnosticLevel.INFO,
+                        DiagnosticEvent.HARNESS_STOP,
+                        mapOf("result" to "ok", "phase" to snapshot.optString("phase")),
+                    )
+                }
+            }
+        }
+    }
+
+    @PluginMethod
+    fun reset(call: PluginCall) {
+        if (call.getString("confirmation") == "RESET_RUNTIME") {
+            harnessOpenRequests.invalidate()
+            harnessStartGeneration.incrementAndGet()
+            requestHarnessStartCancellation()
+            // 重置会清除运行时层，必须先撤掉前台服务，避免服务保留已失效的运行时。
+            stopKeepAliveService()
+        }
+        execute(call) {
+            audited(AuditEvent.RUNTIME_RESET) {
+                val confirmation = call.getString("confirmation")
+                if (confirmation != "RESET_RUNTIME") {
+                    throw RuntimeFailure("RESET_CONFIRMATION_INVALID", "重置确认文本无效")
+                }
+                RuntimeHost.cancelDeviceCommands()
+                controller.reset(confirmation).toJs()
+            }
+        }
+    }
+
+    /**
+     * 权限：应用内桥接。
+     * 分级清理的现状读数：缓存档（登记条目的占用）与插件数据档（账本可用性 + 涉及包数 + 逐包占用）。
+     *
+     * 只读：跑着 Harness 时也允许看 —— 用户要能先看到「哪一档占了多少、现在能不能清」再决定
+     * 停机。只回条目名、计数与受控状态，**不回绝对路径、目录内容**；包名只出现在插件档的逐包
+     * 列表里（界面要按包选择清哪一个），它不落诊断也不落审计。
+     */
+    @PluginMethod
+    fun getRuntimeCleanupState(call: PluginCall) {
+        /*
+         * 这一读会统计三个缓存目录与最多 16 个插件的数据量（`Files.walkFileTree`，预算
+         * 25 万条目/次），在工作区/插件数据大时是秒级同步 I/O。放在桥线程上会把期间所有
+         * 桥调用一起堵住，因此交给后台执行器。
+         */
+        execute(call) {
+            JSObject()
+                .put("runtimeRunning", controller.state().phase == RuntimePhase.RUNNING)
+                .put("cache", cacheCleanupState())
+                .put("plugin", controller.pluginCleanupState())
+        }
+    }
+
+    /**
+     * 权限：应用内桥接。
+     * 缓存档清理：只删登记过的三个目录（诊断导出、工作区分享暂存、PRoot 临时目录）。
+     *
+     * 运行时运行中直接拒绝（`RUNTIME_BUSY`）：这些目录里有正在跑的沙箱的临时文件与投递暂存，
+     * 边跑边删等于把一次会话打断。待安装的更新包**不在**这一档 —— 那是用户已经下载好的更新，
+     * 清掉只会让他重新下载一遍；运行时数据也不在（那是「重置运行环境」，破坏面完全不同）。
+     */
+    @PluginMethod
+    fun clearRuntimeCache(call: PluginCall) {
+        execute(call) {
+            audited(AuditEvent.DATA_CLEANUP) {
+                try {
+                    val outcome = controller.clearRuntimeCache(context.cacheDir)
+                    recordCleanup("cache", outcome)
+                    outcome.toJs()
+                } catch (failure: RuntimeFailure) {
+                    recordCleanupDenied("cache", failure.code)
+                    throw failure
+                }
+            }
+        }
+    }
+
+    /**
+     * 权限：应用内桥接。
+     * 插件数据档清理：删掉每个已登记插件包内部的四个数据目录，**包本体一律不动**。
+     *
+     * 清哪些包完全由版本账本决定：账本读不出来时一个字节都不动，按受控错误码拒绝
+     * （`CLEANUP_LEDGER_UNAVAILABLE`），让界面如实说「清不了」——猜着删的代价远大于清不掉。
+     *
+     * 可选参数 `packageName`：只清这一个包（设置页里逐个插件的「清空数据」）。缺省或传 `null`
+     * 表示整档清空。这个串**只用来和账本条目做相等比较**，绝不参与拼路径——真正的目录永远来自
+     * 账本核对过的 `PackageDirectory.directory`（见 [PluginDataPurge.purge]）。
+     */
+    @PluginMethod
+    fun purgePluginData(call: PluginCall) {
+        execute(call) {
+            audited(AuditEvent.DATA_CLEANUP) {
+                try {
+                    val packageName = cleanupPackageName(call)
+                    val outcome = controller.purgePluginData(packageName)
+                        ?: throw RuntimeFailure("CLEANUP_LEDGER_UNAVAILABLE", "插件版本账本不可用，未清理任何数据")
+                    recordCleanup("plugin_data", outcome)
+                    outcome.toJs()
+                } catch (failure: RuntimeFailure) {
+                    recordCleanupDenied("plugin_data", failure.code)
+                    throw failure
+                }
+            }
+        }
+    }
+
+    /**
+     * 逐包清理的入参：缺省或 `null` = 整档清空，否则必须是形状合法的包名。
+     *
+     * 校验放在桥接层（与无障碍白名单校验同一处惯例）：包名是**用户可控字符串**，形状不合法的
+     * 串必须在碰到文件系统之前就挡下。两个拒收码刻意分开——`CLEANUP_SCOPE_INVALID` 是「这个串
+     * 本身不合法」（用户手滑），`CLEANUP_PLUGIN_UNKNOWN` 是「账本里没有这个包」（插件卸了或换了
+     * 事务）；合成一个码，用户就分不清该改输入还是该刷新列表。
+     */
+    private fun cleanupPackageName(call: PluginCall): String? {
+        val value = call.data.opt("packageName") ?: return null
+        if (value == JSONObject.NULL) return null
+        val packageName = value as? String
+            ?: throw RuntimeFailure("CLEANUP_SCOPE_INVALID", "插件标识必须是字符串")
+        if (!PluginInstallLock.isPackageName(packageName)) {
+            throw RuntimeFailure("CLEANUP_SCOPE_INVALID", "插件标识格式不合法")
+        }
+        return packageName
+    }
+
+    /**
+     * 缓存档现状：只对登记过的条目做 lstat 与尺寸统计，不读内容、不回绝对路径。
+     *
+     * `present` 与尺寸分开回：空目录也是「存在」的，界面要能同时说清「有这个目录」与「它现在
+     * 占多少」；两者都由同一份白名单驱动，缓存目录里没登记的条目一律不出现。
+     */
+    private fun cacheCleanupState(): JSObject {
+        val entries = org.json.JSONArray()
+        var files = 0
+        var bytes = 0L
+        for (name in RuntimeCacheEntries.CLEARABLE) {
+            val target = File(context.cacheDir, name)
+            val present = try {
+                RuntimeFiles.existsNoFollow(target)
+            } catch (_: Throwable) {
+                // 读不出来时按存在处理：让界面显示「有这个目录但读不到」，而不是显示成不存在。
+                true
+            }
+            val size = RuntimeResidueSizing.of(target)
+            entries.put(
+                JSObject()
+                    .put("name", name)
+                    .put("present", present)
+                    .put("files", size.entries)
+                    .put("bytes", size.bytes),
+            )
+            files += size.entries
+            bytes += size.bytes
+        }
+        return JSObject().put("entries", entries).put("files", files).put("bytes", bytes)
+    }
+
+    /**
+     * 清理结果落诊断：只记受控码与计数，不记目录名与包名（诊断日志可以导出分享）。
+     *
+     * `result` 的三种取值对应三件事：`ok` 全都删掉了、`failed` 删了但有条目失败、`denied` 根本没
+     * 开始（运行时在跑或账本不可用）。界面不会把失败说成成功，日志里也必须能分清。
+     */
+    private fun recordCleanup(reason: String, outcome: RuntimeCleanupOutcome) {
+        val fields = mutableMapOf(
+            "reason" to reason,
+            "result" to if (outcome.ok) "ok" else "failed",
+            "files" to outcome.files.toString(),
+            "bytes" to residueBytesToken(outcome.bytes),
+            "count" to outcome.scope.toString(),
+        )
+        if (outcome.failed > 0) fields["code"] = "CLEANUP_PARTIAL_FAILED"
+        diagnostics()?.record(
+            if (outcome.ok) DiagnosticLevel.INFO else DiagnosticLevel.WARN,
+            DiagnosticEvent.CLEANUP,
+            fields,
+        )
+    }
+
+    /** 清理被前置条件挡住（没开始就结束）：同样留一行，否则日志里「点过但什么都没发生」无从解释。 */
+    private fun recordCleanupDenied(reason: String, code: String) {
+        diagnostics()?.record(
+            DiagnosticLevel.WARN,
+            DiagnosticEvent.CLEANUP,
+            mapOf("reason" to reason, "result" to "denied", "code" to code),
+        )
+    }
+
+    /** 清理账的对外形状：只有计数与是否存在，与界面一一对应。 */
+    private fun RuntimeCleanupOutcome.toJs(): JSObject = JSObject()
+        .put("scope", scope)
+        .put("targets", targets)
+        .put("removed", removed)
+        .put("fallback", fallback)
+        .put("failed", failed)
+        .put("files", files)
+        .put("bytes", bytes)
+        .put("skipped", skipped)
+        .put("ok", ok)
+
+    /**
+     * 取得进程级设备桥。
+     *
+     * 构建与配置只在 RuntimeHost 首次创建时执行一次：保活生效时 Harness 进程仍在运行，
+     * `RuntimeSupervisor.configureDeviceBridge` 会拒绝重复配置（`RUNTIME_BUSY`），
+     * 而 Activity 重建时重复配置正是「插件注册失败」的根因。
+     */
+    private fun ensureDeviceBridge() {
+        val reused = RuntimeHost.deviceBridgeOrNull() != null
+        try {
+            // acquireDeviceBridge 保留「同一进程只创建一次」的显式契约；实际构建逻辑
+            // 由 RuntimeHost.ensureDeviceBridge 统一执行，供启动恢复与 WebView 共用。
+            RuntimeHost.acquireDeviceBridge {
+                RuntimeHost.ensureDeviceBridge(controller)
+            }
+            diagnostics()?.record(
+                DiagnosticLevel.INFO,
+                DiagnosticEvent.DEVICE_BRIDGE,
+                mapOf("result" to if (reused) "reused" else "created"),
+            )
+        } catch (error: Throwable) {
+            diagnostics()?.record(
+                DiagnosticLevel.WARN,
+                DiagnosticEvent.DEVICE_BRIDGE,
+                mapOf("result" to "failed", "code" to failureCode(error)),
+            )
+            throw error
+        }
+    }
+
+    /** 权限：本应用桥接。仅枚举操作与 SHA-256 标识；不返回本机路径或凭据。 */
+    @PluginMethod
+    fun manageRuntimeLibrary(call: PluginCall) {
+        execute(call) {
+            val operation = call.getString("operation").orEmpty()
+            if (operation !in setOf("list", "check", "download", "select")) throw RuntimeFailure("RUNTIME_VERSION_INVALID", "版本操作无效")
+            val source = if (operation == "download") io.deepseekharness.mobile.runtime.RuntimeValidation.source(
+                call.getString("manifestUrl"), call.getString("manifestSha256"),
+            ) else null
+            val result = controller.manageRuntimeLibrary(operation, call.getString("id"), source)
+            // 只有「安装本地版本」这一支会带自动快照结论；`list`/`check`/`download` 是 null，
+            // 不要写成「快照失败」——那会把「本来就没拍」说成「拍了但没成」。
+            recordAutoSnapshotAudit(result.autoSnapshot)
+            result.autoSnapshot?.let { result.payload.put("autoSnapshot", it.toJs()) }
+            JSObject(result.payload.toString())
+        }
+    }
+
+    /**
+     * 受控失败码：RuntimeFailure 携带固定枚举码，其他异常统一归一化为 INTERNAL_ERROR。
+     * 绝不写入异常消息——那里可能包含路径或凭据片段。
+     */
+    private fun failureCode(error: Throwable): String =
+        (error as? RuntimeFailure)?.code?.takeIf { code -> code.matches(CONTROLLED_CODE) } ?: "INTERNAL_ERROR"
+
+    /**
+     * 权限：应用内桥接。
+     * 会话工作区：只回传**元数据**（会话标识、标题、最近更新时间）与是否截断。
+     *
+     * 标题来自会话日志里最后一条 `session/title` 事件（没有标题事件时按宿主同款规则从首条
+     * 用户消息折叠出回退标题）；**正文、消息片段、`cwd` 与会话文件路径一律不进 WebView**，
+     * 也不写任何浏览器存储。读取走访客内既有执行通道，凭据不参与（见 [SessionCatalog]）。
+     *
+     * 读不到时回受控错误字段（`RUNTIME_NOT_INSTALLED`/`SESSION_CATALOG_TIMEOUT`/
+     * `SESSION_CATALOG_FAILED`），并**resolve**而不是 reject：壳页据此显示空态 + 一句诚实说明，
+     * 绝不把一次失败显示成「暂无会话」。
+     */
+    @PluginMethod
+    fun sessionList(call: PluginCall) {
+        // SessionCatalog 会准备访客脚本并启动 PRoot 探测；必须与运行时启停/重置共用同一把锁，
+        // 否则启动同时读列表会读到正在替换的 currentRoot 配置。
+        execute(call) { controller.withLifecycleLock { sessionCatalog.list() } }
+    }
+
+    /**
+     * 删除一条**已归档**会话（会话日志目录 + 投影缓存 + workspace 注册表记账）。
+     *
+     * 三点刻意设计：
+     * - 只接受已归档会话：未归档的会话可能正被使用，删除没有补救余地；
+     * - Harness 运行期间直接回 `RUNTIME_RUNNING`：会话日志正被追加，删目录只会留下半个会话；
+     * - 结果走 **resolve**（`{deleted:false,reason}`）而不是 reject：每种拒绝原因都要能被界面
+     *   分别说明，折叠成一句「删除失败」等于不解释。只有标识形态非法才 reject。
+     */
+    @PluginMethod
+    fun deleteSession(call: PluginCall) {
+        execute(call) {
+            controller.withLifecycleLock {
+                val sessionId = call.data.opt("sessionId") as? String
+                    ?: throw RuntimeFailure(SessionDeletion.SESSION_ID_INVALID, "会话标识缺失")
+                val running = controller.state().phase == RuntimePhase.RUNNING
+                // SessionDeletion 回的是 org.json（与访客脚本载荷同一套构造）；桥接层只认 JSObject。
+                JSObject(SessionDeletion.delete(controller.store.currentRoot, sessionId, running).toString())
+            }
+        }
+    }
+
+    /**
+     * 会话快照总览。
+     *
+     * 只返回**快照元数据**：标识、创建时间、版本、文件数与字节数，以及快照根目录（应用私有路径）。
+     * 不含任何会话内容、不含访客路径，也不读会话文件本身，因此是只读操作。
+     */
+    @PluginMethod
+    fun getRuntimeSessionSnapshotState(call: PluginCall) {
+        // 与 sessionList 同一口径：读写共享同一把 lifecycleLock，就必须放到后台执行器上等。
+        execute(call) { JSObject(controller.sessionSnapshotState().toJs().toString()) }
+    }
+
+    /**
+     * 手动创建一份会话快照（更新前自动快照与它共用同一套实现）。
+     *
+     * 会话目录不存在或为空 → `RUNTIME_SNAPSHOT_EMPTY`：**不产出空快照**，
+     * 否则界面会出现一份「看起来有备份、其实什么都没有」的记录。
+     */
+    @PluginMethod
+    fun createRuntimeSessionSnapshot(call: PluginCall) {
+        execute(call) {
+            audited(AuditEvent.RUNTIME_SNAPSHOT) {
+                JSObject(controller.createSessionSnapshot().toJs().toString())
+            }
+        }
+    }
+
+    /**
+     * 把一份快照合并回填到当前运行时的会话目录；**同名文件不覆盖**，跳过的计入 `skippedFileCount`。
+     */
+    @PluginMethod
+    fun restoreRuntimeSessionSnapshot(call: PluginCall) {
+        execute(call) {
+            val id = call.getString("id")
+                ?: throw RuntimeFailure(RuntimeSessionSnapshotCodes.ID_INVALID, "快照标识缺失")
+            audited(AuditEvent.RUNTIME_SNAPSHOT) {
+                JSObject(controller.restoreSessionSnapshot(id).toJs().toString())
+            }
+        }
+    }
+
+    /** 删除一份快照；id 不存在 → `RUNTIME_SNAPSHOT_NOT_FOUND`。 */
+    @PluginMethod
+    fun deleteRuntimeSessionSnapshot(call: PluginCall) {
+        execute(call) {
+            val id = call.getString("id")
+                ?: throw RuntimeFailure(RuntimeSessionSnapshotCodes.ID_INVALID, "快照标识缺失")
+            audited(AuditEvent.RUNTIME_SNAPSHOT) {
+                JSObject(controller.deleteSessionSnapshot(id).toJs().toString())
+            }
+        }
+    }
+
+    /**
+     * 「数据保留」页：上次运行时更新留在暂存目录里的条目。
+     *
+     * 只读。旧版本留下的暂存目录没有回填清单也能列出来——按文件系统实际内容读，
+     * 分类由槽位名判定，因此升级 App 之后仍能看到旧版更新的遗留数据。
+     */
+    @PluginMethod
+    fun getPreserveState(call: PluginCall) {
+        execute(call) { preserveStateToJs(controller.preserveState()) }
+    }
+
+    /**
+     * 把一份待处理副本取回到工作区 `recovered/<id>/`。
+     *
+     * 复制而不是移动：失败时暂存目录仍是完整原件；目标同名文件顺延改名，绝不覆盖。
+     */
+    @PluginMethod
+    fun recoverPreserveItems(call: PluginCall) {
+        execute(call) {
+            val id = call.getString("id") ?: throw RuntimeFailure("PRESERVE_INVALID_ID", "数据保留目录标识缺失")
+            val result = controller.recoverPreservedData(id)
+            JSObject()
+                .put("id", result.id)
+                .put("target", result.target)
+                .put("files", result.files)
+                .put("bytes", result.bytes)
+                .put("skippedSymlinks", result.skippedSymlinks)
+        }
+    }
+
+    /** 丢弃一份待处理副本（用户显式删除）：只删暂存目录，绝不触碰当前运行时。 */
+    @PluginMethod
+    fun discardPreserveItems(call: PluginCall) {
+        execute(call) {
+            val id = call.getString("id") ?: throw RuntimeFailure("PRESERVE_INVALID_ID", "数据保留目录标识缺失")
+            JSObject().put("id", id).put("discarded", controller.discardPreservedData(id))
+        }
+    }
+
+    private fun preserveStateToJs(state: PreserveStore.State): JSObject {
+        val pending = JSArray()
+        for (entry in state.pending) {
+            val items = JSArray()
+            for (item in entry.items) {
+                items.put(
+                    JSObject()
+                        .put("slot", item.slot)
+                        .put("category", item.category)
+                        .put("path", item.path)
+                        .put("bytes", item.bytes)
+                        .put("files", item.files),
+                )
+            }
+            val report = entry.report
+            pending.put(
+                JSObject()
+                    .put("id", entry.id)
+                    .put("updatedAt", entry.updatedAtMillis)
+                    .put("bytes", entry.bytes)
+                    .put("items", items)
+                    .put(
+                        "report",
+                        report?.let {
+                            JSObject()
+                                .put("restored", it.restored)
+                                .put("merged", it.merged)
+                                .put("conflicts", JSArray(it.conflicts.toMutableList()))
+                        },
+                    ),
+            )
+        }
+        return JSObject().put("status", "ready").put("pending", pending)
+    }
+
+    /**
+     * 诊断日志；控制器尚未就绪时返回 null（排障不得影响主流程）。
+     */
+    private fun diagnostics() = if (this::controller.isInitialized) controller.store.diagnostics else null
+
+    /**
+     * 「更新前自动快照」的结果必须**单独可见**。
+     *
+     * 它不阻断安装，所以不会出现在任何被拒绝的调用里：只写审计的话，用户在设备上就只剩
+     * 审计日志一条线索；这里补一条诊断，回答「这次更新到底有没有可用的备份」。
+     *
+     * `null` 表示这次操作本来就不拍快照（`list`/`check`/`download`、切换回上一版本），
+     * **不记任何东西** —— 把「没拍」记成「失败」等于制造假故障。
+     * 只写受控取值与计数，不写路径、不写快照标识。
+     */
+    private fun recordAutoSnapshotAudit(outcome: RuntimeAutoSnapshotOutcome?) {
+        if (outcome == null) return
+        val succeeded = outcome.status != RuntimeAutoSnapshotStatus.FAILED
+        when {
+            outcome.status == RuntimeAutoSnapshotStatus.CREATED ->
+                recordAudit(AuditEvent.RUNTIME_SNAPSHOT, AuditResult.SUCCEEDED)
+            succeeded ->
+                recordAudit(AuditEvent.RUNTIME_SNAPSHOT, AuditResult.SUCCEEDED, outcome.code)
+            else ->
+                recordAudit(AuditEvent.RUNTIME_SNAPSHOT, AuditResult.FAILED, outcome.code)
+        }
+        val log = diagnostics() ?: return
+        val state = controller.sessionSnapshotState()
+        log.record(
+            if (succeeded) DiagnosticLevel.INFO else DiagnosticLevel.WARN,
+            DiagnosticEvent.RUNTIME_SNAPSHOT,
+            buildMap {
+                put("reason", "auto")
+                put("result", outcome.status)
+                outcome.code?.let { put("code", it) }
+                put("count", state.snapshots.size.toString())
+                state.snapshots.firstOrNull()?.let { first ->
+                    put("files", first.fileCount.toString())
+                    put("bytes", first.totalBytes.toString())
+                }
+            },
+        )
+    }
+
+    /**
+     * 诊断日志（必需）。
+     * 只有插件成功加载后才可能被调用的方法使用它；未就绪即属于运行时已关闭。
+     */
+    private fun requireDiagnostics() = diagnostics()
+        ?: throw RuntimeFailure("RUNTIME_CLOSED", "本机运行时正在关闭")
+
+    /**
+     * 运行时自检（必需）。
+     * 自检实例由控制器持有（同一个 store 与同一把生命周期锁）：插件侧绝不自行构造 RuntimeStore，
+     * 自检也不会与安装、重置或 Harness 启停并发。
+     */
+    private fun requireSelfCheck(operation: String): JSObject {
+        if (this::controller.isInitialized) return controller.runRuntimeSelfCheck(operation)
+        throw RuntimeFailure("RUNTIME_CLOSED", "本机运行时正在关闭")
+    }
+
+    /**
+     * 记录「上次进程非正常结束」。
+     *
+     * 进程被系统杀死（强制停止、内存回收、厂商清理，以及**安装新版本 APK**）时不会走到
+     * handleOnDestroy，持久化的运行意图会停留在 RUNNING。因此判据是：上次意图为 RUNNING、
+     * 而本进程并没有持有正在运行的 Harness。
+     *
+     * 这是排查「会话为什么会坏」时最需要的第一手证据 —— 一次被硬中断的 agent 轮次会留下
+     * 悬空的 tool_calls，之后每一轮都会因历史不合法而失败。
+     */
+    private fun recordUncleanExitIfNeeded() {
+        if (uncleanExitRecorded) return
+        uncleanExitRecorded = true
+        val log = diagnostics() ?: return
+        if (controller.store.runtimeIntentRecord().intent != RuntimeIntent.RUNNING) return
+        val phase = controller.state().phase
+        if (phase == RuntimePhase.RUNNING) return
+        log.record(
+            DiagnosticLevel.WARN,
+            DiagnosticEvent.RECOVERY,
+            mapOf("reason" to "unclean_exit", "phase" to phase.wireValue),
+        )
+    }
+
+    @PluginMethod
+    fun createTerminal(call: PluginCall) {
+        execute(call) {
+            audited(AuditEvent.TERMINAL_OPEN) {
+                val kind = call.getString("kind") ?: throw RuntimeFailure("TERMINAL_KIND_INVALID", "终端类型缺失")
+                val columns = call.getInt("columns") ?: throw RuntimeFailure("TERMINAL_SIZE_INVALID", "终端列数缺失")
+                val rows = call.getInt("rows") ?: throw RuntimeFailure("TERMINAL_SIZE_INVALID", "终端行数缺失")
+                JSObject().put("sessionId", controller.createTerminal(kind, columns, rows))
+            }
+        }
+    }
+
+    @PluginMethod
+    fun writeTerminal(call: PluginCall) {
+        execute(call) {
+            val sessionId = call.getString("sessionId") ?: throw RuntimeFailure("SESSION_ID_INVALID", "终端会话标识缺失")
+            val dataBase64 = call.getString("dataBase64") ?: throw RuntimeFailure("TERMINAL_INPUT_INVALID", "终端输入缺失")
+            controller.writeTerminal(sessionId, dataBase64)
+            null
+        }
+    }
+
+    @PluginMethod
+    fun resizeTerminal(call: PluginCall) {
+        execute(call) {
+            val sessionId = call.getString("sessionId") ?: throw RuntimeFailure("SESSION_ID_INVALID", "终端会话标识缺失")
+            val columns = call.getInt("columns") ?: throw RuntimeFailure("TERMINAL_SIZE_INVALID", "终端列数缺失")
+            val rows = call.getInt("rows") ?: throw RuntimeFailure("TERMINAL_SIZE_INVALID", "终端行数缺失")
+            controller.resizeTerminal(sessionId, columns, rows)
+            null
+        }
+    }
+
+    @PluginMethod
+    fun closeTerminal(call: PluginCall) {
+        execute(call) {
+            audited(AuditEvent.TERMINAL_CLOSE) {
+                val sessionId = call.getString("sessionId") ?: throw RuntimeFailure("SESSION_ID_INVALID", "终端会话标识缺失")
+                controller.closeTerminal(sessionId)
+                null
+            }
+        }
+    }
+
+    @PluginMethod
+    fun execDeviceCommand(call: PluginCall) {
+        execute(call) {
+            val sessionId = call.getString("sessionId") ?: throw RuntimeFailure("SESSION_ID_INVALID", "终端会话标识缺失")
+            val commandName = call.getString("command") ?: throw RuntimeFailure("DEVICE_COMMAND_INVALID", "设备命令缺失")
+            val command = DeviceCommand.fromName(commandName) ?: throw RuntimeFailure("DEVICE_COMMAND_INVALID", "设备命令不支持")
+            // 根通道打开时，SHELL 命令由应用进程自己起 `su -c`：那条路径不经过 Shizuku，
+            // 因此既不需要 AI Shell 开关（那是 Shizuku 通道的开关），也不需要 Shizuku 设备会话。
+            val rootEngine = DeviceCommand.requireShellRoute(
+                command, command == DeviceCommand.SHELL && io.deepseekharness.mobile.shizuku.RootEngineAccess.usable(context),
+                io.deepseekharness.mobile.shizuku.DeviceShellAccess.enabled(context),
+            )
+            if (!rootEngine && !controller.hasDeviceSession(sessionId)) {
+                throw RuntimeFailure("SESSION_NOT_FOUND", "设备 Shell 会话不存在或已结束")
+            }
+            val highRiskPermissions = io.deepseekharness.mobile.shizuku.HighRiskPermissionStore.status(context)
+            val rootGuardProfile = io.deepseekharness.mobile.shizuku.RootEngineAccess.guardProfile(context)
+            val param = call.getString("param") ?: ""
+            var rootExecutionGrant: io.deepseekharness.mobile.shizuku.RootExecutionGrant? = null
+            if (command == DeviceCommand.SHELL) {
+                val assessment = io.deepseekharness.mobile.shizuku.RootCommandGuard.verifyPermitted(
+                    script = param,
+                    profile = if (rootEngine) rootGuardProfile else io.deepseekharness.mobile.shizuku.RootCommandGuard.Profile.STRICT,
+                    permissions = highRiskPermissions,
+                )
+                if (rootEngine && assessment.route == io.deepseekharness.mobile.shizuku.RootCommandGuard.ApprovalRoute.ALLOW) {
+                    rootExecutionGrant = io.deepseekharness.mobile.shizuku.RootApprovalRegistry.grantDirect(param, assessment)
+                }
+            }
+            val result = RuntimeHost.deviceCommands()
+                .execute(
+                    sessionId,
+                    command,
+                    param,
+                    DEVICE_COMMAND_TIMEOUT_MS,
+                    useRootEngine = rootEngine,
+                    rootGuardProfile = rootGuardProfile,
+                    rootExecutionGrant = rootExecutionGrant,
+                    allowUnrestrictedFiles = highRiskPermissions.isAllowed(
+                        io.deepseekharness.mobile.shizuku.HighRiskCategory.DEVICE_FILE_UNRESTRICTED,
+                    ),
+                )
+            JSObject()
+                .put("ok", result.ok)
+                .put("exitCode", result.exitCode)
+                .put("text", result.text)
+                .put("truncated", result.truncated)
+                .also { if (result.errorCode != null) it.put("errorCode", result.errorCode) }
+        }
+    }
+
+    /**
+     * 根通道状态：总开关、KernelSU 侧结论、沙箱档位。
+     *
+     * 开关关着时不会去拉 `su`（KernelSU 首次调用会弹授权窗，一个默认关着的功能不该先把弹窗怼上来），
+     * 所以默认状态下这是纯读设置。`refresh = true` 用于用户刚在管理器里改过授权、或刚点「重新检测」：
+     * 丢弃两个探测器的 60 秒缓存重测一次。
+     */
+    @PluginMethod
+    fun rootEngineState(call: PluginCall) {
+        execute(call) {
+            val refresh = call.getBoolean("refresh") ?: false
+            io.deepseekharness.mobile.shizuku.RootEngineAccess.status(
+                context,
+                packageChecker = io.deepseekharness.mobile.shizuku.RootEngineAccess.packageChecker(context),
+                refresh = refresh,
+            ).toJs()
+        }
+    }
+
+    /**
+     * 打开/关闭根通道。
+     *
+     * 打开只是**允许**：真正的授权仍在 KernelSU 管理器里由用户点，本应用不会、也无法代点。
+     * 关掉时把两个探测器的缓存一并丢弃，避免界面继续显示上一次的档位。
+     */
+    @PluginMethod
+    fun setRootEngineEnabled(call: PluginCall) {
+        execute(call) {
+            val enabled = call.getBoolean("enabled")
+                ?: throw RuntimeFailure("ROOT_ENGINE_INPUT_INVALID", "根通道开关取值无效")
+            audited(AuditEvent.ROOT_ENGINE_SETTING) {
+                io.deepseekharness.mobile.shizuku.RootEngineAccess.save(context, enabled)
+                io.deepseekharness.mobile.shizuku.RootProbe.clearCache()
+                io.deepseekharness.mobile.shizuku.RootSandboxProbe.clearCache()
+                io.deepseekharness.mobile.shizuku.RootEngineAccess.status(
+                    context,
+                    packageChecker = io.deepseekharness.mobile.shizuku.RootEngineAccess.packageChecker(context),
+                ).toJs()
+            }
+        }
+    }
+
+    /**
+     * 设置根通道模式与护栏档位。
+     *
+     * 无效取值一律落到最保守的组合（`off` + `strict`），不把 `"true"` 这类字符串当成开启。
+     * 打开读写档只是**允许**：KernelSU 授权仍在管理器里由用户点。
+     */
+    @PluginMethod
+    fun setRootEngineMode(call: PluginCall) {
+        execute(call) {
+            val mode = io.deepseekharness.mobile.shizuku.RootEngineAccess.Mode.fromWire(call.getString("mode"))
+            val profile = io.deepseekharness.mobile.shizuku.RootCommandGuard.Profile.fromWire(call.getString("guardProfile"))
+            audited(AuditEvent.ROOT_ENGINE_SETTING) {
+                io.deepseekharness.mobile.shizuku.RootEngineAccess.save(context, mode, profile)
+                io.deepseekharness.mobile.shizuku.RootProbe.clearCache()
+                io.deepseekharness.mobile.shizuku.RootSandboxProbe.clearCache()
+                io.deepseekharness.mobile.shizuku.RootEngineAccess.status(
+                    context,
+                    packageChecker = io.deepseekharness.mobile.shizuku.RootEngineAccess.packageChecker(context),
+                ).toJs()
+            }
+        }
+    }
+
+    /**
+     * 读取「AI 高危文件与命令权限」设置（1 个总开关 + 17 个细分开关）。
+     */
+    @PluginMethod
+    fun getHighRiskPermissions(call: PluginCall) {
+        execute(call) {
+            io.deepseekharness.mobile.shizuku.HighRiskPermissionStore.status(context).toJs()
+        }
+    }
+
+    /**
+     * 更新「AI 高危文件与命令权限」设置（支持只改总开关、只改部分细分开关或同时修改）。
+     *
+     * 所有高危操作均由宿主硬编码规则在 [io.deepseekharness.mobile.shizuku.RootCommandGuard.verifyPermitted]
+     * 中主动拦截，绝不交由 AI 自行决定。
+     */
+    @PluginMethod
+    fun setHighRiskPermissions(call: PluginCall) {
+        execute(call) {
+            val data = call.data
+                ?: throw RuntimeFailure("HIGH_RISK_PERMISSION_INVALID", "高危权限更新参数缺失")
+            val enabledRaw = if (data.has("enabled")) data.opt("enabled") else null
+            val categoriesRaw = if (data.has("categories")) {
+                val raw = data.opt("categories")
+                if (raw == null || raw == JSONObject.NULL) {
+                    null
+                } else {
+                    raw as? JSONObject
+                        ?: throw RuntimeFailure("HIGH_RISK_PERMISSION_INVALID", "高危权限细分项格式无效")
+                }
+            } else {
+                null
+            }
+            val (enabled, categoryUpdates) = io.deepseekharness.mobile.shizuku.HighRiskPermissionStore.parseUpdate(
+                enabledRaw = enabledRaw,
+                categoriesObj = categoriesRaw,
+            )
+            audited(AuditEvent.ROOT_ENGINE_SETTING) {
+                val updated = io.deepseekharness.mobile.shizuku.HighRiskPermissionStore.update(
+                    context = context,
+                    enabled = enabled,
+                    categoryUpdates = categoryUpdates,
+                )
+                // 收紧总开关或关闭任意细分权限时，立即吊销所有在途审批挑战并关闭等待确认的警告窗。
+                if (enabled == false || categoryUpdates.values.any { !it }) {
+                    io.deepseekharness.mobile.shizuku.RootApprovalCoordinator.cancelAll()
+                    io.deepseekharness.mobile.shizuku.RootApprovalRegistry.clear()
+                }
+                updated.toJs()
+            }
+        }
+    }
+
+    /**
+     * 设备电源动作：重启 / 关机。**只给设置页，不给 AI。**
+     *
+     * 设备桥没有这条命令，AI 工具也不暴露它；每次点击都必须先通过系统身份确认
+     * （API 30+ 生物识别或锁屏密码，API 26–29 锁屏凭据）。确认后由应用进程直接执行
+     * 编译期常量 `reboot` / `reboot -p`，不经过 AI 可写的命令通道。
+     */
+    @PluginMethod
+    fun requestDevicePowerAction(call: PluginCall) {
+        val action = call.getString("action")
+        if (action != "reboot" && action != "powerOff") {
+            call.reject("电源动作只能是 reboot 或 powerOff", "DEVICE_POWER_ACTION_INVALID")
+            return
+        }
+        // 这里只读模式（SharedPreferences），不在 Capacitor 桥线程上拉 `su` 探测：
+        // 界面按钮是否可点已经由卡片状态（`usable`）把关；真正的授权/可用性由执行时的
+        // `su -c` 结果回答。桥线程阻塞会让所有桥调用排队（见 AGENTS.md 第 9 条）。
+        if (io.deepseekharness.mobile.shizuku.RootEngineAccess.mode(context) !=
+            io.deepseekharness.mobile.shizuku.RootEngineAccess.Mode.READ_WRITE
+        ) {
+            call.reject("根通道当前不可用，无法执行电源操作", "ROOT_ENGINE_UNAVAILABLE")
+            return
+        }
+        val currentActivity = activity
+        if (currentActivity == null) {
+            call.reject("当前没有可用的界面，无法进行系统身份确认", "POWER_CONFIRM_UNAVAILABLE")
+            return
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            requestBiometricPowerConfirmation(currentActivity, call, action)
+        } else {
+            requestDeviceCredentialPowerConfirmation(currentActivity, call, action)
+        }
+    }
+
+    private fun powerActionLabel(action: String): String = if (action == "reboot") "重启设备" else "关机"
+
+    /** API 30+：系统生物识别或锁屏密码；通过后执行固定电源命令。 */
+    private fun requestBiometricPowerConfirmation(
+        currentActivity: android.app.Activity,
+        call: PluginCall,
+        action: String,
+    ) {
+        val fragmentActivity = currentActivity as? androidx.fragment.app.FragmentActivity
+        if (fragmentActivity == null) {
+            call.reject("当前界面不支持系统身份确认", "POWER_CONFIRM_UNAVAILABLE")
+            return
+        }
+        val manager = BiometricManager.from(fragmentActivity)
+        val authenticators = BiometricManager.Authenticators.BIOMETRIC_STRONG or
+            BiometricManager.Authenticators.DEVICE_CREDENTIAL
+        if (manager.canAuthenticate(authenticators) != BiometricManager.BIOMETRIC_SUCCESS) {
+            call.reject("设备上没有可用的生物识别或锁屏密码", "POWER_CONFIRM_UNAVAILABLE")
+            return
+        }
+        pendingPowerPrompt?.cancelAuthentication()
+        lateinit var prompt: BiometricPrompt
+        prompt = BiometricPrompt(
+            fragmentActivity,
+            ContextCompat.getMainExecutor(fragmentActivity),
+            object : BiometricPrompt.AuthenticationCallback() {
+                override fun onAuthenticationSucceeded(result: BiometricPrompt.AuthenticationResult) {
+                    clearPendingPowerPrompt(prompt)
+                    execute(call) {
+                        audited(AuditEvent.DEVICE_POWER_ACTION) { performDevicePowerAction(action) }
+                    }
+                }
+
+                override fun onAuthenticationError(errorCode: Int, errString: CharSequence) {
+                    clearPendingPowerPrompt(prompt)
+                    call.reject(
+                        "系统身份确认未通过",
+                        if (errorCode == BiometricPrompt.ERROR_USER_CANCELED ||
+                            errorCode == BiometricPrompt.ERROR_NEGATIVE_BUTTON ||
+                            errorCode == BiometricPrompt.ERROR_CANCELED
+                        ) {
+                            "POWER_CONFIRM_CANCELLED"
+                        } else {
+                            "POWER_CONFIRM_FAILED"
+                        },
+                    )
+                }
+            },
+        )
+        pendingPowerPrompt = prompt
+        val label = powerActionLabel(action)
+        val info = BiometricPrompt.PromptInfo.Builder()
+            .setTitle("确认$label")
+            .setSubtitle("通过后立即$label；此操作不会交给 AI")
+            .setAllowedAuthenticators(authenticators)
+            .build()
+        fragmentActivity.runOnUiThread {
+            try {
+                prompt.authenticate(info)
+            } catch (_: Throwable) {
+                clearPendingPowerPrompt(prompt)
+                call.reject("设备上没有可用的身份确认界面", "POWER_CONFIRM_UNAVAILABLE")
+            }
+        }
+    }
+
+    /** API 26–29：系统锁屏凭据界面；结果只认 `RESULT_OK`。 */
+    @Suppress("DEPRECATION")
+    private fun requestDeviceCredentialPowerConfirmation(
+        currentActivity: android.app.Activity,
+        call: PluginCall,
+        action: String,
+    ) {
+        val keyguard = currentActivity.getSystemService(KeyguardManager::class.java)
+        val label = powerActionLabel(action)
+        val intent = keyguard?.createConfirmDeviceCredentialIntent(
+            "确认$label",
+            "通过后立即$label；此操作不会交给 AI",
+        )
+        if (intent == null) {
+            call.reject("设备未设置锁屏密码，无法确认身份", "POWER_CONFIRM_UNAVAILABLE")
+            return
+        }
+        pendingPowerAction = action
+        currentActivity.runOnUiThread {
+            try {
+                startActivityForResult(call, intent, "devicePowerConfirmed")
+            } catch (_: Throwable) {
+                pendingPowerAction = null
+                call.reject("设备上没有可用的身份确认界面", "POWER_CONFIRM_UNAVAILABLE")
+            }
+        }
+    }
+
+    @ActivityCallback
+    private fun devicePowerConfirmed(call: PluginCall?, result: ActivityResult) {
+        val action = pendingPowerAction
+        pendingPowerAction = null
+        if (call == null) return
+        if (result.resultCode != android.app.Activity.RESULT_OK) {
+            call.reject("已取消系统身份确认", "POWER_CONFIRM_CANCELLED")
+            return
+        }
+        if (action == null) {
+            call.reject("电源操作已失效，请重试", "POWER_CONFIRM_UNAVAILABLE")
+            return
+        }
+        execute(call) {
+            audited(AuditEvent.DEVICE_POWER_ACTION) { performDevicePowerAction(action) }
+        }
+    }
+
+    /** 固定常量脚本；不接受任何调用方输入。 */
+    private fun performDevicePowerAction(action: String): JSObject {
+        val script = when (action) {
+            "reboot" -> "reboot"
+            "powerOff" -> "reboot -p"
+            else -> throw RuntimeFailure("DEVICE_POWER_ACTION_INVALID", "电源动作无效")
+        }
+        val result = io.deepseekharness.mobile.shizuku.RootCommandRunner.runSystemAction(script)
+        if (!result.ok) {
+            throw RuntimeFailure(result.errorCode ?: "DEVICE_POWER_FAILED", "设备电源操作失败")
+        }
+        return JSObject().put("ok", true).put("action", action)
+    }
+
+    private fun clearPendingPowerPrompt(prompt: BiometricPrompt) {
+        if (pendingPowerPrompt === prompt) pendingPowerPrompt = null
+    }
+
+    /**
+     * 副屏直通 Shell（壳内入口）：在会话副屏的 displayId 上执行一次性脚本。
+     *
+     * 与 [execDeviceCommand] 的唯一区别是执行前把副屏编号注入脚本环境（见
+     * [io.deepseekharness.mobile.virtualscreen.VirtualScreenShellPolicy] 的 `prefix`），
+     * 于是脚本里的 `input -d "$DISPLAY_ID"` 与 `am start --display "$DISPLAY_ID"` 会确定地
+     * 落在那块虚拟屏上——这正是 AI 在副屏上注入输入唯一缺的一环。
+     *
+     * 执行路径复用既有设备终端会话与 [RuntimeHost.deviceCommands]，不新建执行器；
+     * 副屏状态只读，不启动、不切换、不结束任何会话。
+     */
+    @PluginMethod
+    fun virtualScreenShell(call: PluginCall) {
+        execute(call) {
+            if (!io.deepseekharness.mobile.shizuku.DeviceShellAccess.enabled(context)) {
+                throw RuntimeFailure("DEVICE_SHELL_DISABLED", "请先开启 AI Shell")
+            }
+            val highRiskPermissions = io.deepseekharness.mobile.shizuku.HighRiskPermissionStore.status(context)
+            val state = io.deepseekharness.mobile.virtualscreen.VirtualScreenService.current?.state()
+            val script = call.getString("script")
+            val plan = io.deepseekharness.mobile.virtualscreen.VirtualScreenShellPolicy.plan(
+                script = script,
+                requestedDisplayId = call.getInt("displayId"),
+                active = state?.optBoolean("active") == true,
+                sessionDisplayId = state?.optInt("displayId", 0) ?: 0,
+                allowMainDisplay = highRiskPermissions.isAllowed(
+                    io.deepseekharness.mobile.shizuku.HighRiskCategory.VIRTUAL_SCREEN_UNRESTRICTED,
+                ),
+            )
+            io.deepseekharness.mobile.shizuku.RootCommandGuard.verifyPermitted(
+                script = requireNotNull(script),
+                profile = io.deepseekharness.mobile.shizuku.RootCommandGuard.Profile.STRICT,
+                permissions = highRiskPermissions,
+            )
+            val sessionId = controller.createTerminal("device", VIRTUAL_SCREEN_COLUMNS, VIRTUAL_SCREEN_ROWS)
+            val result = try {
+                RuntimeHost.deviceCommands()
+                    .execute(sessionId, DeviceCommand.SHELL, plan.command, DEVICE_COMMAND_TIMEOUT_MS)
+            } finally {
+                // 清理失败不覆盖已经拿到的执行结果（与桥里关闭一次性会话的处理一致）。
+                try {
+                    controller.closeTerminal(sessionId)
+                } catch (_: Throwable) {
+                }
+            }
+            JSObject()
+                .put("ok", result.ok)
+                .put("exitCode", result.exitCode)
+                .put("output", result.text)
+                .put("truncated", result.truncated)
+                .put("displayId", plan.displayId)
+                .also { if (result.errorCode != null) it.put("errorCode", result.errorCode) }
+        }
+    }
+
+    /**
+     * 统一能力清单：一次回答「现在能做什么、不能做是因为什么、下一步点哪里」。
+     *
+     * 五项能力（Shizuku / 无障碍 / 副屏 / 截图 / 中文输入）的判定全在
+     * [DeviceCapabilityPolicy] 里，这里只把事实凑齐再原样过桥——判定散到桥上就会有两套口径，
+     * 界面与 AI 迟早看到不一样的说法。
+     *
+     * 与 [getShizukuState] 同理，读取要碰 binder，必须走 [execute]，不能同步跑在 JS 桥线程上。
+     */
+    @PluginMethod
+    fun getDeviceCapabilities(call: PluginCall) {
+        execute(call) { deviceCapabilityFacts().toJs() }
+    }
+
+    /** 凑齐判定所需的事实：只读状态，不做任何动作。 */
+    private fun deviceCapabilityFacts(): DeviceCapabilityFacts {
+        val shizuku = controller.shizukuState()
+        // 根通道关着时 status() 不拉 su（默认状态是纯读设置），所以这张清单每 5 秒轮询仍然便宜。
+        val root = io.deepseekharness.mobile.shizuku.RootEngineAccess.status(
+            context,
+            packageChecker = io.deepseekharness.mobile.shizuku.RootEngineAccess.packageChecker(context),
+        )
+        return DeviceCapabilityFacts(
+            sdkInt = Build.VERSION.SDK_INT,
+            shizukuInstalled = shizuku.installed,
+            shizukuRunning = shizuku.running,
+            shizukuPermission = shizuku.permission,
+            shizukuConnected = shizuku.connected,
+            shellEnabled = io.deepseekharness.mobile.shizuku.DeviceShellAccess.enabled(context),
+            accessibilityStatus = AccessibilityAutomationStore.serviceStatus(context),
+            rootEngineEnabled = root.enabled,
+            rootEngineStatus = if (root.enabled) root.rootStatus else null,
+            rootEngineReason = if (root.enabled) root.reason else null,
+            rootSandboxDegraded = root.degraded,
+        )
+    }
+
+    /**
+     * 读取 Shizuku 状态。
+     *
+     * 必须走 [execute]（后台执行线程），不能像普通读取那样同步跑在 WebView 的 JS 桥线程上：
+     * 前端每 5 秒轮询一次，而读取本身要与 Shizuku 服务端做 binder 调用——服务端卡住时
+     * 同步调用会把整个界面一起卡住（真机反馈「打开 Shizuku 会卡」）。
+     */
+    @PluginMethod
+    fun getShizukuState(call: PluginCall) {
+        execute(call) { controller.shizukuState().toJs() }
+    }
+
+    @PluginMethod
+    fun requestShizukuPermission(call: PluginCall) {
+        execute(call) { requestShizukuPermissionAudited().toJs() }
+    }
+
+    @PluginMethod
+    fun connectShizuku(call: PluginCall) {
+        execute(call) { controller.connectShizuku().toJs() }
+    }
+
+    /**
+     * 打开 Shizuku（拉起管理界面，未安装时指向官方仓库）。
+     *
+     * 同样不能在 JS 桥线程上同步执行：它要拿 [io.deepseekharness.mobile.runtime.MobileRuntimeController]
+     * 的生命周期锁，只要有一次状态读取还挂在卡住的 Shizuku 服务端上，等待就会传导到 WebView 线程。
+     */
+    @PluginMethod
+    fun openShizuku(call: PluginCall) {
+        execute(call) {
+            controller.openShizukuManager()
+            null
+        }
+    }
+
+    /** 仅壳内入口；不接受外部包名或命令，目标应用在原生页面选择。 */
+    @PluginMethod
+    fun openVirtualScreen(call: PluginCall) {
+        activity?.runOnUiThread {
+            resolveWhileActive(call) {
+                if (Build.VERSION.SDK_INT < 29) throw RuntimeFailure("VIRTUAL_SCREEN_UNSUPPORTED", "副屏需要 Android 10 或更高版本")
+                activity.startActivity(Intent(activity, io.deepseekharness.mobile.virtualscreen.VirtualScreenActivity::class.java))
+                null
+            }
+        } ?: call.reject("当前没有可用的页面", "ACTIVITY_UNAVAILABLE")
+    }
+
+    /**
+     * 读取副屏设置：偏好 7 项 + 「下一次启动会用到」的实际规格。
+     *
+     * `widthPx`/`heightPx`/`densityDpi` 是**用户自定义值**（0 表示没自定义过），
+     * 真正会生效的规格在 `effective` 里 —— 前端不要把两者混着显示。
+     */
+    @PluginMethod
+    fun getVirtualScreenSettings(call: PluginCall) {
+        resolveWhileActive(call) { virtualScreenSettingsPayload() }
+    }
+
+    /**
+     * 写入副屏设置：枚举非法**整条拒绝**（一个字段都不落盘），数值越界夹取。
+     * 失败码 [VirtualScreenPreferences.INVALID_CODE]；成功时回写后的完整设置。
+     */
+    @PluginMethod
+    fun setVirtualScreenSettings(call: PluginCall) {
+        val data = call.data ?: JSObject()
+        resolveWhileActive(call) {
+            val update: VirtualScreenSettingsUpdate = VirtualScreenPreferences.parseUpdate(JSONObject(data.toString()))
+            VirtualScreenPreferences.apply(context, update)
+            // 宽度改了要让正在跑的悬浮小窗立刻跟着变，不必重开副屏。
+            // applyOverlayWidth 自己会 hop 到主线程，所以这里可以在桥线程直接调；没有小窗时是空操作。
+            update.overlayWidthPx?.let { width -> VirtualScreenService.current?.applyOverlayWidth(width) }
+            virtualScreenSettingsPayload()
+        }
+    }
+
+    /**
+     * 启动副屏：`packageName` 可给包名或完整组件名，其余字段只对本次会话生效、不写回偏好。
+     * 规格由 [VirtualScreenStart.resolve] 定（自适应 → 请求里的尺寸 → 偏好里的尺寸 → 方向预设），
+     * 保证过得了设备端 `VirtualScreenPolicy.dimensions` 那道启动闸门。
+     */
+    @PluginMethod
+    fun startVirtualScreen(call: PluginCall) {
+        val data = call.data ?: JSObject()
+        resolveWhileActive(call) {
+            if (Build.VERSION.SDK_INT < 29) throw RuntimeFailure("VIRTUAL_SCREEN_UNSUPPORTED", "副屏需要 Android 10 或更高版本")
+            if (VirtualScreenService.current != null) throw RuntimeFailure("VIRTUAL_SCREEN_BUSY", "副屏已经在运行，先停止再启动")
+            val request: VirtualScreenStartRequest = VirtualScreenPreferences.parseStart(JSONObject(data.toString()))
+            // 启动即落盘：用户改完设置常常直接点启动，不先点「保存设置」。
+            VirtualScreenPreferences.apply(context, VirtualScreenPreferences.updateFromStart(request))
+            val component = virtualScreenComponent(request.target)
+            val settings: VirtualScreenSettings = VirtualScreenPreferences.read(context)
+            val (screenWidth, screenHeight, density) = virtualScreenScreenSize()
+            val spec = VirtualScreenStart.resolve(request, settings, screenWidth, screenHeight, density)
+            val orientation = request.orientation ?: settings.orientation
+            val adaptive = request.adaptive ?: settings.adaptive
+            ContextCompat.startForegroundService(
+                context,
+                Intent(context, VirtualScreenService::class.java)
+                    .putExtra("component", component)
+                    // 尺寸只在服务侧换算一次；页面勾的方向就是本次会话的方向。
+                    .putVirtualScreenStart(spec, adaptive, orientation)
+            )
+            JSObject()
+                .put("component", component)
+                .put("orientation", orientation)
+                .put("adaptive", adaptive)
+                .put("widthPx", spec.widthPx)
+                .put("heightPx", spec.heightPx)
+                .put("densityDpi", spec.densityDpi)
+        }
+    }
+
+    /** 后台等待旧显示释放后才完成 stop，保证前端可以直接 await stop 再启动。 */
+    @PluginMethod
+    fun stopVirtualScreen(call: PluginCall) {
+        execute(call) {
+            val service = VirtualScreenService.current
+            if (service == null) {
+                context.stopService(Intent(context, VirtualScreenService::class.java))
+                JSObject().put("stopping", false).put("active", false)
+            } else {
+                val released = try {
+                    service.requestStop().get(30, TimeUnit.SECONDS)
+                } catch (_: java.util.concurrent.TimeoutException) {
+                    throw RuntimeFailure("VIRTUAL_SCREEN_BUSY", "副屏仍在结束，请稍后重试")
+                }
+                if (!released) throw RuntimeFailure("VIRTUAL_SCREEN_CLOSE_FAILED", "旧副屏未能释放，请检查 Shizuku 连接")
+                JSObject().put("stopping", false).put("active", false)
+            }
+        }
+    }
+
+    /** 会话快照 + 偏好 + 真实读数合并成的状态对象；字段表见 `docs/design/副屏设置桥.md`。 */
+    @PluginMethod
+    fun getVirtualScreenState(call: PluginCall) {
+        resolveWhileActive(call) { virtualScreenStatePayload() }
+    }
+
+    /**
+     * 设置页要的「偏好 + 实际生效规格」。没有会话时 `effective` 是按当前屏幕与偏好**推算**的
+     * 下次启动规格（供页面预览），不代表此刻已有副屏 —— 所以另外带上 `active`。
+     */
+    private fun virtualScreenSettingsPayload(): JSObject {
+        val settings = VirtualScreenPreferences.read(context)
+        val (screenWidth, screenHeight, density) = virtualScreenScreenSize()
+        val effective = VirtualScreenStart.resolve(settings, screenWidth, screenHeight, density)
+        return JSObject()
+            .put("previewMode", settings.previewMode)
+            .put("autoFollow", settings.autoFollow)
+            .put("orientation", settings.orientation)
+            .put("adaptive", settings.adaptive)
+            .put("widthPx", settings.widthPx)
+            .put("heightPx", settings.heightPx)
+            .put("densityDpi", settings.densityDpi)
+            // 悬浮小窗的宽度（0 = 跟随屏幕最大）。页面里的预览与小窗共用这一项，
+            // 因此设置页显示的数值就是两处真正在用的数值。
+            .put("overlayWidthPx", settings.overlayWidthPx)
+            .put(
+                "effective",
+                JSObject().put("widthPx", effective.widthPx).put("heightPx", effective.heightPx).put("densityDpi", effective.densityDpi),
+            )
+            .put("active", VirtualScreenService.current != null)
+    }
+
+    /**
+     * 状态对象有三个来源：设备端会话快照（真机读数）、本次会话的方向/自适应、偏好。
+     *
+     * 尺寸优先用宿主从 `DisplayManager` 读回的真实参数（[VirtualScreenService.displayReadback]），
+     * 读不到才退到会话请求值，再退到偏好 —— 设置页显示的因此永远是真正生效的规格。
+     */
+    private fun virtualScreenStatePayload(): JSObject {
+        val settings = VirtualScreenPreferences.read(context)
+        val (screenWidth, screenHeight, density) = virtualScreenScreenSize()
+        val fallback = VirtualScreenStart.resolve(settings, screenWidth, screenHeight, density)
+        val service = VirtualScreenService.current
+            ?: return VirtualScreenPreferences.mergeState(null, settings, fallback).toJsObject()
+        val session = runCatching { JSONObject(service.state().toString()) }.getOrNull()
+        val summary = runCatching { JSONObject(service.sessionSummary().toString()) }.getOrNull()
+        summary?.let { value ->
+            // 会话里记的方向/自适应就是本次真正用的值：并进快照，交给 mergeState 按「会话优先」合并。
+            session?.put("orientation", value.optString("orientation"))
+            session?.put("adaptive", value.optBoolean("adaptive"))
+        }
+        val requested = summary?.let {
+            VirtualScreenSpec(
+                it.optInt("widthPx", fallback.widthPx),
+                it.optInt("heightPx", fallback.heightPx),
+                it.optInt("densityDpi", fallback.densityDpi),
+            )
+        } ?: fallback
+        val readback = runCatching { service.displayReadback() }.getOrNull()
+        return VirtualScreenPreferences.mergeState(session, settings, requested, readback).toJsObject()
+    }
+
+    /**
+     * 目标串 → 组件名：完整组件名直接用（再走一次既有校验），包名则由系统查启动入口。
+     * 校验失败一律转成 [RuntimeFailure]，否则会被 [resolveSafely] 吞成 INTERNAL_ERROR。
+     */
+    private fun virtualScreenComponent(target: String): String = when (VirtualScreenPreferences.targetKind(target)) {
+        VirtualScreenTargetKind.COMPONENT -> requireComponent(target)
+        VirtualScreenTargetKind.PACKAGE -> {
+            val launch = context.packageManager.getLaunchIntentForPackage(target)
+            val component = launch?.component?.flattenToShortString()
+                ?: throw RuntimeFailure(VirtualScreenPolicy.LAUNCH_UNRESOLVED_CODE, "没有找到 $target 的可启动入口")
+            requireComponent(component)
+        }
+        VirtualScreenTargetKind.INVALID -> throw RuntimeFailure(VirtualScreenPreferences.INVALID_CODE, "目标应用无效：$target")
+    }
+
+    private fun requireComponent(value: String): String = runCatching { VirtualScreenPolicy.component(value) }
+        .getOrElse { throw RuntimeFailure(VirtualScreenPreferences.INVALID_CODE, it.message ?: "目标应用入口无效") }
+
+    /**
+     * 真实屏幕宽高与显示密度：优先 `DisplayManager` 的 real metrics（含系统栏），读不到退到
+     * 插件上下文自己的 displayMetrics。两条路都在读本机真实值，不编造数字。
+     */
+    private fun virtualScreenScreenSize(): Triple<Int, Int, Float> {
+        val metrics = DisplayMetrics()
+        val display = context.getSystemService(DisplayManager::class.java)?.getDisplay(Display.DEFAULT_DISPLAY)
+        runCatching { display?.getRealMetrics(metrics) }
+        if (metrics.widthPixels > 0 && metrics.heightPixels > 0 && metrics.density > 0f) {
+            return Triple(metrics.widthPixels, metrics.heightPixels, metrics.density)
+        }
+        val fallback = context.resources.displayMetrics
+        return Triple(fallback.widthPixels, fallback.heightPixels, fallback.density)
+    }
+
+    /**
+     * 权限：应用内桥接。
+     * 只返回后台保持与恢复状态（布尔值、枚举、时间戳），不含 URL、凭据或终端内容。
+     */
+    @PluginMethod
+    fun getKeepAliveState(call: PluginCall) {
+        execute(call) {
+            controller.keepAliveSnapshot(RuntimeHost.isForegroundServiceActive()).toJs()
+        }
+    }
+
+    /**
+     * 权限：应用内桥接；仅申请前台服务通知权限。
+     * Android 13 以下不需要该权限，直接返回已授予；被拒绝时只返回结果，
+     * 不阻止 Harness 运行，由界面提示用户自行在系统设置中开启。
+     */
+    @PluginMethod
+    fun requestNotificationPermission(call: PluginCall) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) {
+            call.resolve(JSObject().put("granted", true).put("supported", false))
+            return
+        }
+        if (notificationPermissionGranted()) {
+            call.resolve(JSObject().put("granted", true).put("supported", true))
+            return
+        }
+        val currentActivity = activity
+        if (currentActivity == null) {
+            // 没有前台 Activity 时无法弹系统对话框：如实返回未授予，不挂起调用。
+            call.resolve(JSObject().put("granted", false).put("supported", true))
+            return
+        }
+        // Capacitor 的插件方法运行在桥接线程上，而权限申请必须从主线程发起。
+        currentActivity.runOnUiThread {
+            // Activity 未到 STARTED（页面切换 / 重建竞态）时 launcher.launch 不可用，
+            // 直接按当前真实授权状态结清，由界面在回到前台后重试或引导去系统设置。
+            val lifecycleReady = runCatching {
+                currentActivity.lifecycle.currentState.isAtLeast(androidx.lifecycle.Lifecycle.State.STARTED)
+            }.getOrDefault(false)
+            if (!lifecycleReady) {
+                runCatching {
+                    call.resolve(
+                        JSObject()
+                            .put("granted", notificationPermissionGranted())
+                            .put("supported", true),
+                    )
+                }
+                return@runOnUiThread
+            }
+            // 真机（小米 HyperOS / Android 16）实测 requestPermissionForAliases 内部会抛
+            // NullPointerException：Capacitor 的 ActivityResultLauncher 在 Activity 重建竞态
+            // 或 ROM 改造的 ActivityResultRegistry 上可能未就绪。该异常逃出主线程会直接闪退，
+            // 这里兜住：系统对话框没弹出来时按当前真实授权状态结清调用，界面随后引导去设置页。
+            try {
+                requestPermissionForAlias(NOTIFICATION_PERMISSION_ALIAS, call, "notificationPermissionCallback")
+            } catch (error: Throwable) {
+                android.util.Log.w(
+                    "dsh-runtime",
+                    "notification permission request failed: ${error.javaClass.simpleName}",
+                )
+                runCatching {
+                    call.resolve(
+                        JSObject()
+                            .put("granted", notificationPermissionGranted())
+                            .put("supported", true),
+                    )
+                }
+            }
+        }
+    }
+
+    @PermissionCallback
+    private fun notificationPermissionCallback(call: PluginCall?) {
+        call?.resolve(
+            JSObject()
+                .put("granted", notificationPermissionGranted())
+                .put("supported", true),
+        )
+    }
+
+    /**
+     * 权限：应用内桥接。
+     * 返回 Harness 访客进程 stdout/stderr 的有界尾部（按 UTF-8 字符边界截断），
+     * 供设置页的「运行日志」展示。
+     *
+     * 为什么需要它：工具调用失败时界面往往只显示一句没有栈的 JS 报错，排查无法进行；
+     * 而 dsh 自己打印的完整异常就在访客进程输出里，此前被有界缓冲保留、却没有任何出口。
+     *
+     * 隐私边界：这段文本可能包含会话内容，因此**只回传当前界面**——
+     * 不写入诊断日志、不新增诊断事件或字段、不落盘、不随诊断日志导出。
+     *
+     * 运行时不持有 Harness 输出时如实返回 available=false，不猜造内容。
+     *
+     * 窗口：`maxBytes` 由 [clampHarnessTailBytes] 收敛到 8 / 64 / 256 KB 三档，
+     * 缺省 8 KB。放大窗口不会读到缓冲区里没有的内容，因此界面可以放心多给几档。
+     */
+    @PluginMethod
+    fun getHarnessLog(call: PluginCall) {
+        resolveWhileActive(call) {
+            // 窗口由原生侧收敛到受控档位（8 / 64 / 256 KB），界面只能请求这几种大小。
+            val window = clampHarnessTailBytes(call.getInt("maxBytes"))
+            val text = HarnessOutputTailSource.read(window)
+            JSObject()
+                .put("available", text != null)
+                .put("text", text.orEmpty())
+                .put("maxBytes", window)
+        }
+    }
+
+    /**
+     * 权限：应用内桥接。
+     * 只返回诊断日志的状态（开关、保留天数、文件数、总字节数、最近记录时间），
+     * 不回传任何日志内容。
+     */
+    @PluginMethod
+    fun getDiagnosticLogState(call: PluginCall) {
+        resolveWhileActive(call) { diagnosticStateJs(requireDiagnostics()) }
+    }
+
+    /**
+     * 权限：应用内桥接。
+     * 返回诊断日志的尾部窗口，供设置页在应用内直接查看。
+     *
+     * 内容仍然是受控字段（见 [DiagnosticPolicy]）：不含 URL、凭据、终端内容或用户数据，
+     * 因此读进 WebView 不构成新的泄露面。窗口由原生侧夹到 1 KB..256 KB，
+     * 缺省 64 KB；只读、不落盘、不产生导出文件。
+     */
+    @PluginMethod
+    fun readDiagnosticLog(call: PluginCall) {
+        resolveWhileActive(call) {
+            val maxBytes = DiagnosticPolicy.clampReadBytes(call.getInt("maxBytes"))
+            requireDiagnostics().read(maxBytes).toJs()
+        }
+    }
+
+    /**
+     * 权限：应用内桥接。
+     * 更新收集开关与保留天数；保留天数由原生侧夹到 1..30，非法输入直接拒绝。
+     */
+    @PluginMethod
+    fun setDiagnosticLogSettings(call: PluginCall) {
+        execute(call) {
+            val enabled = call.getBoolean("enabled")
+                ?: throw RuntimeFailure("DIAGNOSTIC_SETTINGS_INVALID", "诊断日志开关缺失")
+            val retentionDays = call.getInt("retentionDays")
+                ?: throw RuntimeFailure("DIAGNOSTIC_SETTINGS_INVALID", "诊断日志保留天数缺失")
+            val log = requireDiagnostics()
+            val includeHarnessLog = call.getBoolean("includeHarnessLog") ?: log.includeHarnessLog()
+            diagnosticStateJs(log, log.setSettings(enabled, retentionDays, includeHarnessLog))
+        }
+    }
+
+    /**
+     * 权限：应用内桥接。
+     * 导出应用诊断日志（以及可选附带的 Harness 运行日志尾部）并用系统分享面板交给用户选择去向；
+     * 二者都为空时明确失败，不生成空文件。附加的运行日志仅自动脱敏凭据，仍可能包含路径、URL 与会话内容。
+     */
+    @PluginMethod
+    fun shareDiagnosticLog(call: PluginCall) {
+        execute(call) {
+            val log = requireDiagnostics()
+            val harnessLog = if (log.includeHarnessLog()) HarnessOutputTailSource.read(64 * 1024) else null
+            val export = log.export(harnessLog = harnessLog)
+                ?: throw RuntimeFailure("DIAGNOSTIC_EXPORT_EMPTY", "当前没有可导出的诊断日志")
+            val uri = FileProvider.getUriForFile(context, log.fileProviderAuthority(), log.exportedFile(export))
+            val send = Intent(Intent.ACTION_SEND).apply {
+                type = "text/plain"
+                putExtra(Intent.EXTRA_STREAM, uri)
+                putExtra(Intent.EXTRA_SUBJECT, context.getString(R.string.diagnostic_share_subject))
+                clipData = ClipData.newRawUri(export.fileName, uri)
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            }
+            try {
+                context.startActivity(
+                    Intent.createChooser(send, context.getString(R.string.diagnostic_share_title))
+                        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+                )
+            } catch (error: Throwable) {
+                throw RuntimeFailure("DIAGNOSTIC_SHARE_FAILED", "无法打开分享面板", error)
+            }
+            diagnosticStateJs(log).also { json ->
+                json.put("fileName", export.fileName)
+                json.put("exportedBytes", export.sizeBytes)
+            }
+        }
+    }
+
+    /**
+     * 权限：应用内桥接。
+     * 将运行时工作区复制到临时 ZIP 后交给系统分享面板；不直接暴露私有运行时路径。
+     * 只跟随普通文件，拒绝符号链接，并限制条目数与总大小，避免意外打包整个运行时。
+     */
+    @PluginMethod
+    fun shareRuntimeWorkspace(call: PluginCall) {
+        execute(call) {
+            val workspace = File(controller.store.currentRoot, "root/1")
+            if (!workspace.isDirectory || Files.isSymbolicLink(workspace.toPath())) {
+                throw RuntimeFailure("WORKSPACE_EXPORT_UNAVAILABLE", "运行时工作区尚未准备好")
+            }
+            val exportDir = File(context.cacheDir, RuntimeCacheEntries.WORKSPACE_SHARE)
+            if ((!exportDir.isDirectory && !exportDir.mkdirs()) || Files.isSymbolicLink(exportDir.toPath())) {
+                throw RuntimeFailure("WORKSPACE_EXPORT_FAILED", "无法准备工作区分享目录")
+            }
+            val export = File.createTempFile("dsh-workspace-", ".zip", exportDir)
+            var entries = 0
+            var bytes = 0L
+            try {
+                ZipOutputStream(FileOutputStream(export)).use { zip ->
+                    Files.walkFileTree(workspace.toPath(), object : SimpleFileVisitor<java.nio.file.Path>() {
+                        override fun visitFile(file: java.nio.file.Path, attrs: BasicFileAttributes): FileVisitResult {
+                            if (!attrs.isRegularFile || attrs.isSymbolicLink) return FileVisitResult.CONTINUE
+                            if (++entries > 2_000) throw RuntimeFailure("WORKSPACE_EXPORT_TOO_LARGE", "工作区文件数量超过限制")
+                            if (attrs.size() > 128L * 1024 * 1024 - bytes) {
+                                throw RuntimeFailure("WORKSPACE_EXPORT_TOO_LARGE", "工作区大小超过限制")
+                            }
+                            val relative = workspace.toPath().relativize(file).toString().replace(File.separatorChar, '/')
+                            zip.putNextEntry(ZipEntry(relative))
+                            BufferedInputStream(
+                                Files.newInputStream(file, StandardOpenOption.READ, LinkOption.NOFOLLOW_LINKS),
+                            ).use { input ->
+                                val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
+                                while (true) {
+                                    val read = input.read(buffer)
+                                    if (read < 0) break
+                                    bytes += read
+                                    if (bytes > 128L * 1024 * 1024) {
+                                        throw RuntimeFailure("WORKSPACE_EXPORT_TOO_LARGE", "工作区大小超过限制")
+                                    }
+                                    zip.write(buffer, 0, read)
+                                }
+                            }
+                            zip.closeEntry()
+                            return FileVisitResult.CONTINUE
+                        }
+                    })
+                }
+                val uri = FileProvider.getUriForFile(context, "${context.packageName}.diagnostics", export)
+                val send = Intent(Intent.ACTION_SEND).apply {
+                    type = "application/zip"
+                    putExtra(Intent.EXTRA_STREAM, uri)
+                    putExtra(Intent.EXTRA_SUBJECT, "DSH 工作区")
+                    clipData = ClipData.newRawUri(export.name, uri)
+                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                }
+                context.startActivity(Intent.createChooser(send, "分享 DSH 工作区").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+                null
+            } catch (failure: RuntimeFailure) {
+                export.delete()
+                throw failure
+            } catch (error: Throwable) {
+                export.delete()
+                throw RuntimeFailure("WORKSPACE_EXPORT_FAILED", "无法导出 DSH 工作区", error)
+            }
+        }
+    }
+
+    private fun workspaceFileManager() = controller.store.let { store ->
+        RuntimeWorkspaceFiles.forDefaultWorkspace(store.currentRoot, context.cacheDir, store.runtimeParent.parentFile!!)
+    }
+
+    @PluginMethod
+    fun listRuntimeWorkspaceFiles(call: PluginCall) {
+        execute(call) {
+            val snapshot = workspaceFileManager().list()
+            JSObject().put("files", org.json.JSONArray(snapshot.files)).put("truncated", snapshot.truncated)
+        }
+    }
+
+    private fun shareWorkspaceFile(relative: String, open: Boolean) {
+        val manager = workspaceFileManager()
+        val target = try {
+            manager.copyForSharing(relative)
+        } catch (failure: RuntimeFailure) {
+            if (failure.code != RuntimeWorkspaceFiles.SHARE_FILE_TOO_LARGE) throw failure
+            val message = AppLanguage.localizedContext(context).getString(R.string.harness_file_share_too_large)
+            throw RuntimeFailure(failure.code, message, failure)
+        }
+        val uri = FileProvider.getUriForFile(context, "${context.packageName}.diagnostics", target)
+        val intent = Intent(if (open) Intent.ACTION_VIEW else Intent.ACTION_SEND).apply {
+            val mime = manager.mimeType(relative)
+            if (open) setDataAndType(uri, mime) else {
+                type = mime
+                putExtra(Intent.EXTRA_STREAM, uri)
+            }
+            clipData = ClipData.newRawUri(target.name, uri)
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
+        context.startActivity(Intent.createChooser(intent, if (open) "打开 DSH 文件" else "分享 DSH 文件").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+    }
+
+    @PluginMethod
+    fun shareRuntimeWorkspaceFile(call: PluginCall) {
+        execute(call) { shareWorkspaceFile(call.getString("path") ?: throw RuntimeFailure("WORKSPACE_PATH_INVALID", "工作区文件路径缺失"), false); null }
+    }
+
+    @PluginMethod
+    fun openRuntimeWorkspaceFile(call: PluginCall) {
+        execute(call) { shareWorkspaceFile(call.getString("path") ?: throw RuntimeFailure("WORKSPACE_PATH_INVALID", "工作区文件路径缺失"), true); null }
+    }
+
+    @PluginMethod
+    fun deleteRuntimeWorkspaceFile(call: PluginCall) {
+        execute(call) {
+            val path = call.getString("path")
+                ?: throw RuntimeFailure("WORKSPACE_PATH_INVALID", "工作区文件路径缺失")
+            workspaceFileManager().delete(path)
+            null
+        }
+    }
+
+    /** 权限：应用内桥接；清空全部诊断日志。 */
+    @PluginMethod
+    fun clearDiagnosticLog(call: PluginCall) {
+        execute(call) {
+            val log = requireDiagnostics()
+            diagnosticStateJs(log, log.clear())
+        }
+    }
+
+    private fun diagnosticStateJs(
+        log: io.deepseekharness.mobile.runtime.diagnostics.DiagnosticLog,
+        state: io.deepseekharness.mobile.runtime.diagnostics.DiagnosticState = log.state(),
+    ): JSObject = state.toJs(
+        harnessLogAvailable = !HarnessOutputTailSource.read(4096).isNullOrBlank(),
+    )
+
+    /**
+     * 权限：应用内桥接。
+     * 只返回存储访问的布尔与枚举状态，不含任何文件路径或目录内容。
+     */
+    @PluginMethod
+    fun getStorageAccessState(call: PluginCall) {
+        resolveWhileActive(call) { storageAccessStateJson() }
+    }
+
+    /**
+     * 权限：应用内桥接。
+     * 投递区状态：用户可见路径、访客挂载点、可用性与 inbox 计数（最多列 5 个 tar）。
+     * **不含**任何私有路径、宿主 canonical 路径或文件内容。
+     */
+    @PluginMethod
+    fun mailboxState(call: PluginCall) {
+        resolveWhileActive(call) { RuntimeMailbox(controller.store).state().toJs() }
+    }
+
+    @PluginMethod
+    fun getDeviceShellAccess(call: PluginCall) {
+        resolveWhileActive(call) { JSObject().put("enabled", io.deepseekharness.mobile.shizuku.DeviceShellAccess.enabled(context)) }
+    }
+
+    /**
+     * 权限：应用内桥接。
+     * 「用外部浏览器打开 Harness」可选的浏览器清单与当前选择。
+     *
+     * 只回包名与显示名，不含浏览历史或任何用户数据。`selected` 会被重新核对：
+     * 已保存的浏览器被卸载/禁用后回 `null`，让界面退回「每次询问系统选择器」，
+     * 而不是留一个指向不存在应用的下拉项。
+     *
+     * 一次包管理查询 + 至多 32 条结果，放在后台执行器上，避免占住串行桥线程。
+     */
+    @PluginMethod
+    fun getExternalBrowsers(call: PluginCall) {
+        execute(call) {
+            val browsers = ExternalBrowsers.list(context)
+            val selected = controller.store.externalBrowserPackage()
+            JSObject()
+                .put("browsers", ExternalBrowsers.toJson(browsers))
+                // 保存的包名不在当前清单里（已卸载/禁用）就当作未选择：打开时退回系统选择器。
+                .put(
+                    "selected",
+                    browsers.firstOrNull { it.packageName == selected }?.packageName ?: JSONObject.NULL,
+                )
+        }
+    }
+
+    /**
+     * 权限：应用内桥接。
+     * 保存「用哪个外部浏览器打开」，传 `null` 表示每次询问系统选择器。
+     *
+     * 包名必须在当前可处理网页的清单里——这个值最终会进显式 Intent 的 `setPackage`，
+     * 不能接受任意字符串。不在清单里就按契约错误拒绝，而不是静默存下一个打不开的值。
+     */
+    @PluginMethod
+    fun setExternalBrowser(call: PluginCall) {
+        execute(call) {
+            val requested = call.data.opt("packageName")
+            val packageName = when (requested) {
+                null, JSONObject.NULL -> null
+                is String -> requested
+                else -> throw RuntimeFailure("SETTINGS_INVALID", "外部浏览器标识格式无效")
+            }
+            if (packageName != null && ExternalBrowsers.select(context, packageName) == null) {
+                // 与清单同一份复核：既校验格式，也确认它现在真的能打开网页。
+                throw RuntimeFailure("EXTERNAL_BROWSER_UNAVAILABLE", "所选浏览器当前不可用，请重新选择")
+            }
+            controller.store.setExternalBrowserPackage(packageName)
+            null
+        }
+    }
+
+    /** 只允许壳内用户修改授权；设备桥不提供开启此开关的接口。 */
+    @PluginMethod
+    fun setDeviceShellAccess(call: PluginCall) {
+        execute(call) {
+            val enabled = call.data.opt("enabled") as? Boolean
+                ?: throw RuntimeFailure("SETTINGS_INVALID", "Shell 授权开关必须是布尔值")
+            audited(AuditEvent.ACCESSIBILITY_CONFIG) {
+                io.deepseekharness.mobile.shizuku.DeviceShellAccess.save(context, enabled)
+                JSObject().put("enabled", enabled)
+            }
+        }
+    }
+
+    /** 读取无障碍服务状态与用户维护的目标应用白名单；不返回当前窗口内容。 */
+    @PluginMethod
+    fun getAccessibilityAutomationState(call: PluginCall) {
+        resolveWhileActive(call) {
+            audited(AuditEvent.ACCESSIBILITY_CONFIG) {
+                accessibilityStateToJs(AccessibilityAutomationStore.state(context))
+            }
+        }
+    }
+
+    /**
+     * 权限：应用内桥接；改「自动化总开关」——开始 / 暂停 / 继续 / 紧急停止。
+     *
+     * **设备桥（AI 侧）没有开启路径**：`automationRules` 命令在总开关不是 `running` 时一律回
+     * `AUTOMATION_ENABLE_FORBIDDEN`（`docs/design/AI自动化参数设计.md` 的「AI 只能关不能开」）。
+     * 这里只接受四个受控动作名，未知一律拒收——不能把认不出来的参数猜成「开始」。
+     *
+     * 暂停与紧急停止都**不关**系统里的无障碍服务（不调 `disableSelf()`），也不动白名单与规则：
+     * 用户按下「停」想停的是动作，不是把服务授权一起撤掉。
+     */
+    @PluginMethod
+    fun setAccessibilityAutomationRuntime(call: PluginCall) {
+        execute(call) {
+            val raw = call.data.opt("action")
+            if (raw !is String) {
+                throw RuntimeFailure("ACCESSIBILITY_CONFIG_INVALID", "自动化操作必须是字符串")
+            }
+            val action = AutomationControlPolicy.actionFromName(raw)
+                ?: throw RuntimeFailure("ACCESSIBILITY_CONFIG_INVALID", "未知的自动化操作：$raw")
+            audited(AuditEvent.ACCESSIBILITY_CONFIG) {
+                // 服务连着就让服务改（它还要同步会话开关与内存缓存）；没连上就直接落盘——同一份偏好文件。
+                DeepSeekAccessibilityService.current()?.applyAutomationRuntime(action)
+                    ?: AutomationControlStore.apply(context, action)
+                // 审计只记「哪个动作被按下」这个受控码，不带包名、不带界面内容。
+                recordAudit(
+                    AuditEvent.ACCESSIBILITY_CONFIG,
+                    AuditResult.SUCCEEDED,
+                    AutomationControlPolicy.auditDetail(action),
+                )
+                accessibilityStateToJs(AccessibilityAutomationStore.state(context))
+            }
+        }
+    }
+
+    /**
+     * 权限：应用内桥接；读**本次服务会话**里的自动化运行记录与拦截原因。
+     *
+     * 记录刻意不落盘（见 `AutomationRunLog`），因此服务被系统回收后这里会从空开始：
+     * `connected` 与 `dropped` 就是给界面如实说明用的，**不能**把「读不到」显示成「什么都没发生」。
+     * `message` 是原生受控码的中文说明（`AutomationSkipMessages`），未登记的码回 null，界面显示原始码。
+     */
+    @PluginMethod
+    fun getAccessibilityAutomationRuns(call: PluginCall) {
+        resolveWhileActive(call) {
+            val packageName = optionalAutomationPackage(call)
+            val service = DeepSeekAccessibilityService.current()
+            val runs = JSArray()
+            for (record in service?.automationRunSnapshot(packageName, AutomationRunLogPolicy.MAX_RECORDS_PER_PACKAGE).orEmpty()) {
+                runs.put(
+                    JSObject()
+                        .put("atMs", record.atMs)
+                        .put("ruleId", record.ruleId)
+                        .put("action", record.action)
+                        .put("code", record.code)
+                        .put("message", AutomationSkipMessages.messageOrNull(record.code) ?: org.json.JSONObject.NULL)
+                        .put("ok", record.ok)
+                        .put("performed", record.performed)
+                        .put("degraded", record.degraded),
+                )
+            }
+            val blocked = JSArray()
+            for (entry in service?.automationBlockedSnapshot(packageName, AutomationRunLogPolicy.MAX_BLOCKED_CODES).orEmpty()) {
+                blocked.put(
+                    JSObject()
+                        .put("code", entry.code)
+                        .put("count", entry.count)
+                        .put("message", AutomationSkipMessages.messageOrNull(entry.code) ?: org.json.JSONObject.NULL),
+                )
+            }
+            JSObject()
+                .put("connected", service != null)
+                .put("limit", service?.automationRunLimit() ?: AutomationRunLogPolicy.MAX_RECORDS_PER_PACKAGE)
+                .put("dropped", service?.automationDroppedCount() ?: 0)
+                .put("runs", runs)
+                .put("blocked", blocked)
+        }
+    }
+
+    /**
+     * 权限：应用内桥接；读**当前任务台账**的只读快照（设置页那块「当前任务」用它）。
+     *
+     * 台账只活在无障碍服务进程里（刻意不落盘）：服务没连上时 `task` 一律是 `null`，
+     * 界面必须把「读不到」与「现在没有任务」分开显示——这正是 `connected` 的用途。
+     * 快照里没有任何界面文字：包名、步骤标识与受控码只到这一层，**不进诊断日志**。
+     */
+    @PluginMethod
+    fun getAutomationTaskState(call: PluginCall) {
+        resolveWhileActive(call) {
+            val service = DeepSeekAccessibilityService.current()
+            JSObject()
+                .put("connected", service != null)
+                .put(
+                    "task",
+                    service?.currentAutomationTask()?.takeIf { it.taskId.isNotEmpty() }?.toJs()
+                        ?: JSONObject.NULL,
+                )
+        }
+    }
+
+    /**
+     * 权限：应用内桥接；取消当前任务（设置页的「取消任务」）。**AI 侧没有这条路。**
+     *
+     * 取消只把未收口的步骤记成 `skipped` + `AUTOMATION_TASK_CANCELLED`：已经发出去的那一次动作
+     * 不会被假装没发生——它留在台账里，调用方自己回去确认现场。没有任务时按受控码拒收，
+     * 不做「悄悄什么也没发生」的空操作。
+     */
+    @PluginMethod
+    fun cancelAutomationTask(call: PluginCall) {
+        execute(call) {
+            val service = DeepSeekAccessibilityService.current()
+                ?: throw RuntimeFailure("ACCESSIBILITY_SERVICE_DISABLED", "无障碍服务没有连上，没有可取消的任务")
+            audited(AuditEvent.ACCESSIBILITY_CONFIG) {
+                if (service.currentAutomationTask().taskId.isEmpty()) {
+                    throw RuntimeFailure("AUTOMATION_TASK_NOT_PLANNED", "现在没有任务可取消")
+                }
+                val snapshot = service.cancelAutomationTask()
+                // 审计只记「取消被按下」这个受控码，不带包名、不带步骤标识。
+                recordAudit(AuditEvent.ACCESSIBILITY_CONFIG, AuditResult.SUCCEEDED, "AUTOMATION_TASK_CANCEL")
+                JSObject()
+                    .put("connected", true)
+                    .put("task", snapshot.toJs())
+            }
+        }
+    }
+
+    /** 任务快照过桥：步骤只带标识 / 动作 / 状态 / 已试次数 / 受控码，不带任何界面文字。 */
+    private fun AutomationTaskSnapshot.toJs(): JSObject {
+        val array = JSArray()
+        for (step in steps) {
+            array.put(
+                JSObject()
+                    .put("id", step.id)
+                    .put("action", step.action)
+                    .put("status", step.status)
+                    .put("attempts", step.attemptsUsed)
+                    .put("code", step.code ?: JSONObject.NULL),
+            )
+        }
+        return JSObject()
+            .put("taskId", taskId)
+            .put("status", status)
+            .put("packageName", packageName)
+            .put("nextStep", nextStepId ?: JSONObject.NULL)
+            .put("settledSteps", settledSteps)
+            .put("pendingSteps", pendingSteps)
+            .put("lastCode", lastCode ?: JSONObject.NULL)
+            .put("lastMessage", lastMessage ?: JSONObject.NULL)
+            .put("steps", array)
+    }
+
+    /**
+     * 权限：应用内桥接；读某个包已保存的自动化规则（**只读**，不改内容）。
+     *
+     * 与设备桥的 `automationRules` 命令分开：那条命令还会点亮会话开关，这里只读，**不打开任何东西**。
+     * 规则内容（选择器、动作、抑制参数）只回给界面，**不进诊断日志**——诊断走受控码白名单
+     * （`DiagnosticPolicy`），选择器里的文本能反推界面内容。
+     * 返回里带 `allowed`：不在白名单里的包，规则照样读得出来（它是用户/AI 写下的数据），
+     * 但界面必须说明「规则在，不会被任何事件用到」，不能显示成正常工作。
+     */
+    @PluginMethod
+    fun getAccessibilityAutomationRules(call: PluginCall) {
+        resolveWhileActive(call) {
+            accessibilityRulesToJs(requiredAutomationPackage(call))
+        }
+    }
+
+    /**
+     * 权限：应用内桥接；读**一条**规则的全文（选择器与动作参数），给编辑表单预填。
+     *
+     * 为什么另开一条、而不是把列表读宽：列表刻意只带摘要（选择器里的文本能反推界面内容），
+     * 而编辑在存储层是**整条替换**——表单预填不出原来的内容，用户点一次「保存」就等于把原有
+     * 选择器整片抹掉。这条同样只读：不写盘、不进审计、不打开任何开关（与设备桥的
+     * `automationRules` 命令不同）。白名单外的包照样读得出来（规则是用户/AI 写下的数据），
+     * 界面按 `allowed` 决定是否允许保存，并说明「规则在，但不会被任何事件用到」。
+     */
+    @PluginMethod
+    fun getAccessibilityAutomationRule(call: PluginCall) {
+        resolveWhileActive(call) {
+            val packageName = requiredAutomationPackage(call)
+            val ruleId = call.data.opt("ruleId") as? String
+                ?: throw RuntimeFailure("ACCESSIBILITY_CONFIG_INVALID", "规则标识必须是字符串")
+            if (!AUTOMATION_RULE_ID.matches(ruleId)) {
+                throw RuntimeFailure("ACCESSIBILITY_CONFIG_INVALID", "规则标识格式不合法")
+            }
+            val read = AutomationRuleEditor.find(
+                AutomationRulePreferences.from(context),
+                packageName,
+                ruleId,
+            )
+            when (read) {
+                is AutomationRuleEditor.ReadOutcome.Found -> JSObject()
+                    .put("packageName", packageName)
+                    .put("ruleId", ruleId)
+                    .put("allowed", AccessibilityAutomationStore.packageAllowed(context, packageName))
+                    .put("rule", read.rule.toRuleJson())
+
+                is AutomationRuleEditor.ReadOutcome.Rejected ->
+                    throw configFailure(read.code, read.message)
+            }
+        }
+    }
+
+    /**
+     * 权限：应用内桥接；单条规则的启用 / 停用（只改 `enabled` 一个字段）。
+     *
+     * 写之前**必须过白名单**（拍板结论第 5 条：白名单校验放在桥接层）：白名单外的包一律拒写，
+     * 否则「AI 不能绕过白名单」这条硬约束会在应用内这条路径上被绕开。
+     * 其余字段逐字原样写回（整包替换是存储层的既有口径），因此这里不会顺手改动规则内容。
+     */
+    @PluginMethod
+    fun setAccessibilityAutomationRuleEnabled(call: PluginCall) {
+        execute(call) {
+            val packageName = requiredAutomationPackage(call)
+            val rawId = call.data.opt("ruleId")
+            val ruleId = rawId as? String ?: throw RuntimeFailure("ACCESSIBILITY_CONFIG_INVALID", "规则标识必须是字符串")
+            if (!AUTOMATION_RULE_ID.matches(ruleId)) {
+                throw RuntimeFailure("ACCESSIBILITY_CONFIG_INVALID", "规则标识格式不合法")
+            }
+            val rawEnabled = call.data.opt("enabled")
+            val enabled = rawEnabled as? Boolean
+                ?: throw RuntimeFailure("ACCESSIBILITY_CONFIG_INVALID", "规则的启用状态必须是布尔值")
+            audited(AuditEvent.ACCESSIBILITY_CONFIG) {
+                if (!AccessibilityAutomationStore.packageAllowed(context, packageName)) {
+                    throw RuntimeFailure(
+                        "ACCESSIBILITY_CONFIG_DENIED",
+                        "应用 $packageName 不在无障碍自动化白名单内，规则写入被拒绝",
+                    )
+                }
+                val store = AutomationRulePreferences.from(context)
+                when (val read = AutomationRuleStore.readPackage(store, packageName)) {
+                    is AutomationRuleStore.PackageRead.Ok -> {
+                        if (read.rules.none { it.id == ruleId }) {
+                            throw RuntimeFailure("ACCESSIBILITY_CONFIG_NOT_FOUND", "找不到这条规则：$ruleId")
+                        }
+                        val updated = read.rules.map { if (it.id == ruleId) it.copy(enabled = enabled) else it }
+                        runCatching { AutomationRuleStore.savePackage(store, packageName, updated) }
+                            .onFailure { throw RuntimeFailure("ACCESSIBILITY_CONFIG_SAVE_FAILED", "规则写入失败") }
+                    }
+                    is AutomationRuleStore.PackageRead.Corrupt ->
+                        throw RuntimeFailure("ACCESSIBILITY_CONFIG_CORRUPT", "读取规则失败：${read.message}")
+                }
+                // 审计只记「哪条规则被开/关」这个受控码，不带规则内容、不带选择器。
+                recordAudit(
+                    AuditEvent.ACCESSIBILITY_CONFIG,
+                    AuditResult.SUCCEEDED,
+                    if (enabled) "AUTOMATION_RULE_ENABLED" else "AUTOMATION_RULE_DISABLED",
+                )
+                accessibilityRulesToJs(packageName)
+            }
+        }
+    }
+
+    /**
+     * 权限：应用内桥接；新建或整条替换一条自动化规则。
+     *
+     * 参数：`packageName`、`mode`（`create` / `update`）、`rule`（完整规则 JSON，字段与
+     * `AutomationRule.fromJson` 同一套，未知字段一律拒收）。
+     * 写之前**必须过白名单**（与单条开关同一个口径）：白名单外的包一律拒写，否则「AI 不能绕过
+     * 白名单」这条硬约束会在应用内这条路径上被绕开。
+     * 审计只记「新建/替换了一条规则」这个受控码，**不带规则内容**——选择器里的文本能反推界面内容。
+     */
+    @PluginMethod
+    fun saveAccessibilityAutomationRule(call: PluginCall) {
+        execute(call) {
+            val packageName = requiredAutomationPackage(call)
+            val draft = call.data.opt("rule") as? org.json.JSONObject
+                ?: throw RuntimeFailure("ACCESSIBILITY_CONFIG_INVALID", "规则内容必须是对象")
+            val mode = call.data.opt("mode") as? String
+                ?: throw RuntimeFailure("ACCESSIBILITY_CONFIG_INVALID", "规则的写入方式必须是字符串")
+            audited(AuditEvent.ACCESSIBILITY_CONFIG) {
+                requireAutomationWriteAllowed(packageName)
+                val outcome = AutomationRuleEditor.save(
+                    AutomationRulePreferences.from(context),
+                    packageName,
+                    draft,
+                    mode,
+                )
+                when (outcome) {
+                    is AutomationRuleEditor.Outcome.Applied ->
+                        recordAudit(
+                            AuditEvent.ACCESSIBILITY_CONFIG,
+                            AuditResult.SUCCEEDED,
+                            if (mode == AutomationRuleEditor.MODE_CREATE) {
+                                "AUTOMATION_RULE_CREATED"
+                            } else {
+                                "AUTOMATION_RULE_UPDATED"
+                            },
+                        )
+
+                    is AutomationRuleEditor.Outcome.Rejected -> throw automationRuleFailure(outcome)
+                }
+                accessibilityRulesToJs(packageName)
+            }
+        }
+    }
+
+    /**
+     * 权限：应用内桥接；删除一条自动化规则。
+     *
+     * 与写入同一套口径：白名单外拒删（它不是「危险操作」而是「这个包本来就不归自动化管」），
+     * 找不到即拒，删空之后存储层等价于把这个包的规则整份清掉。
+     */
+    @PluginMethod
+    fun deleteAccessibilityAutomationRule(call: PluginCall) {
+        execute(call) {
+            val packageName = requiredAutomationPackage(call)
+            val ruleId = call.data.opt("ruleId") as? String
+                ?: throw RuntimeFailure("ACCESSIBILITY_CONFIG_INVALID", "规则标识必须是字符串")
+            if (!AUTOMATION_RULE_ID.matches(ruleId)) {
+                throw RuntimeFailure("ACCESSIBILITY_CONFIG_INVALID", "规则标识格式不合法")
+            }
+            audited(AuditEvent.ACCESSIBILITY_CONFIG) {
+                requireAutomationWriteAllowed(packageName)
+                val outcome = AutomationRuleEditor.delete(
+                    AutomationRulePreferences.from(context),
+                    packageName,
+                    ruleId,
+                )
+                when (outcome) {
+                    is AutomationRuleEditor.Outcome.Applied -> recordAudit(
+                        AuditEvent.ACCESSIBILITY_CONFIG,
+                        AuditResult.SUCCEEDED,
+                        "AUTOMATION_RULE_DELETED",
+                    )
+
+                    is AutomationRuleEditor.Outcome.Rejected -> throw automationRuleFailure(outcome)
+                }
+                accessibilityRulesToJs(packageName)
+            }
+        }
+    }
+
+    /**
+     * 规则写入的白名单闸门。
+     *
+     * 抽出来是因为新建/替换/删除/单条开关四条路径必须**同一句话、同一个判定**：任一条路径自己
+     * 写一遍，将来就有一天只在某一条上漏检。
+     */
+    private fun requireAutomationWriteAllowed(packageName: String) {
+        if (!AccessibilityAutomationStore.packageAllowed(context, packageName)) {
+            throw RuntimeFailure(
+                "ACCESSIBILITY_CONFIG_DENIED",
+                "应用 $packageName 不在无障碍自动化白名单内，规则写入被拒绝",
+            )
+        }
+    }
+
+    /**
+     * 把编辑侧的受控码翻成界面认识的那一组 `ACCESSIBILITY_CONFIG_*`。
+     *
+     * 界面的文案按这一组码分流（冲突 / 找不到 / 超限 / 数据损坏 / 写失败 / 参数问题），
+     * 编辑侧的内部码不外泄——否则前端要同时认识两套词汇表。
+     */
+    private fun automationRuleFailure(rejected: AutomationRuleEditor.Outcome.Rejected): RuntimeFailure =
+        configFailure(rejected.code, rejected.message)
+
+    /**
+     * 编辑侧的受控码翻成界面认识的那一组 `ACCESSIBILITY_CONFIG_*`。
+     *
+     * 界面的文案按这一组码分流（冲突 / 找不到 / 超限 / 数据损坏 / 写失败 / 参数问题），
+     * 编辑侧的内部码不外泄——否则前端要同时认识两套词汇表。读路径（`getAccessibilityAutomationRule`）
+     * 与写路径共用这一份映射，免得同一个「找不到」在两条路上是两个码。
+     */
+    private fun configFailure(code: String, message: String): RuntimeFailure =
+        when (code) {
+            AutomationRuleEditor.Codes.ID_CONFLICT ->
+                RuntimeFailure("ACCESSIBILITY_CONFIG_CONFLICT", message)
+
+            AutomationRuleEditor.Codes.NOT_FOUND ->
+                RuntimeFailure("ACCESSIBILITY_CONFIG_NOT_FOUND", message)
+
+            AutomationRuleEditor.Codes.LIMIT_REACHED ->
+                RuntimeFailure("ACCESSIBILITY_CONFIG_LIMIT", message)
+
+            AutomationRuleEditor.Codes.CORRUPT ->
+                RuntimeFailure("ACCESSIBILITY_CONFIG_CORRUPT", message)
+
+            AutomationRuleEditor.Codes.STORAGE_FAILED ->
+                RuntimeFailure("ACCESSIBILITY_CONFIG_SAVE_FAILED", message)
+
+            else -> RuntimeFailure("ACCESSIBILITY_CONFIG_INVALID", message)
+        }
+
+    /** 把某个包的规则渲染成界面读数；`corrupt` 非空表示这份数据不可用且已被清掉。 */
+    private fun accessibilityRulesToJs(packageName: String): JSObject {
+        val rules = JSArray()
+        val read = AutomationRuleStore.readPackage(AutomationRulePreferences.from(context), packageName)
+        if (read is AutomationRuleStore.PackageRead.Ok) {
+            for (rule in read.rules.sortedBy { it.id }) {
+                rules.put(
+                    JSObject()
+                        .put("id", rule.id)
+                        .put("enabled", rule.enabled)
+                        .put("actionKind", rule.action.type)
+                        .put("selectorCount", rule.selectors.size)
+                        .put("maxActions", rule.maxActions)
+                        .put("actionCoolDownMs", rule.actionCoolDownMs),
+                )
+            }
+        }
+        val corrupt = (read as? AutomationRuleStore.PackageRead.Corrupt)?.let {
+            JSObject().put("code", it.code).put("message", it.message)
+        }
+        return JSObject()
+            .put("packageName", packageName)
+            .put("allowed", AccessibilityAutomationStore.packageAllowed(context, packageName))
+            .put("corrupt", corrupt ?: org.json.JSONObject.NULL)
+            .put("rules", rules)
+    }
+
+    /**
+     * 必填的包名参数（读 / 写规则都要）。
+     *
+     * 与可选的那个分开：这里缺参数就是调用方的问题，直接拒收，**不**回落到前台包——
+     * 写规则的路径上「你以为写的是 A，其实写到 B」是最不该发生的错。
+     */
+    private fun requiredAutomationPackage(call: PluginCall): String {
+        val raw = call.data.opt("packageName")
+            ?: throw RuntimeFailure("ACCESSIBILITY_CONFIG_INVALID", "缺少包名")
+        val value = raw as? String
+            ?: throw RuntimeFailure("ACCESSIBILITY_CONFIG_INVALID", "自动化规则的包名必须是字符串")
+        if (!AccessibilityAutomationPolicy.validPackage(value)) {
+            throw RuntimeFailure("ACCESSIBILITY_CONFIG_INVALID", "自动化规则的包名不合法")
+        }
+        return value
+    }
+
+    /**
+     * 可选的包名过滤：给了就必须是合法包名。
+     *
+     * 拿它去查记录之前先按 `AccessibilityAutomationPolicy.validPackage` 卡一道，是因为这个值会被
+     * 回显在界面上——不合法即拒收，不把任意字符串原样带回前端。
+     */
+    private fun optionalAutomationPackage(call: PluginCall): String? {
+        val raw = call.data.opt("packageName") ?: return null
+        val value = raw as? String
+            ?: throw RuntimeFailure("ACCESSIBILITY_CONFIG_INVALID", "自动化运行记录的包名必须是字符串")
+        if (!AccessibilityAutomationPolicy.validPackage(value)) {
+            throw RuntimeFailure("ACCESSIBILITY_CONFIG_INVALID", "自动化运行记录的包名不合法")
+        }
+        return value
+    }
+
+    /**
+     * 权限：仅壳内桥接；只回「读取应用列表」这条国产 ROM 权限是否存在、是否已授予。
+     *
+     * `supported=false`（AOSP / Pixel / 三星）表示系统根本没有这条权限，前端按「无需申请」
+     * 处理，不能把它显示成「未授予」，否则用户会在系统设置里找一个不存在的开关。
+     */
+    @PluginMethod
+    fun getInstalledApplicationsPermission(call: PluginCall) {
+        execute(call) {
+            JSObject()
+                .put("supported", AppListAccess.supported(context))
+                .put("granted", AppListAccess.granted(context))
+        }
+    }
+
+    /**
+     * 权限：应用内桥接；仅在系统定义了「读取应用列表」权限时申请。
+     *
+     * 与通知权限同一套写法（见 [requestNotificationPermission]）：没有前台 Activity、或
+     * Activity 未到 STARTED 时直接按真实授权状态结清，不把调用挂起；Capacitor 的
+     * ActivityResultLauncher 在部分 ROM / Activity 重建竞态下会抛异常，必须在这里接住，
+     * 否则异常逃出主线程会直接闪退。拒绝后由界面引导到应用详情页（[openApplicationSettings]）。
+     */
+    @PluginMethod
+    fun requestInstalledApplicationsPermission(call: PluginCall) {
+        if (!AppListAccess.supported(context)) {
+            call.resolve(JSObject().put("supported", false).put("granted", true))
+            return
+        }
+        if (AppListAccess.granted(context)) {
+            call.resolve(JSObject().put("supported", true).put("granted", true))
+            return
+        }
+        val currentActivity = activity
+        if (currentActivity == null) {
+            // 没有前台 Activity 时弹不出系统对话框：如实返回未授予，由界面提供设置页入口。
+            call.resolve(JSObject().put("supported", true).put("granted", false))
+            return
+        }
+        currentActivity.runOnUiThread {
+            val lifecycleReady = runCatching {
+                currentActivity.lifecycle.currentState.isAtLeast(androidx.lifecycle.Lifecycle.State.STARTED)
+            }.getOrDefault(false)
+            if (!lifecycleReady) {
+                runCatching { call.resolve(installedApplicationsPermissionResult()) }
+                return@runOnUiThread
+            }
+            try {
+                requestPermissionForAlias(
+                    APP_LIST_PERMISSION_ALIAS,
+                    call,
+                    "installedApplicationsPermissionCallback",
+                )
+            } catch (error: Throwable) {
+                android.util.Log.w(
+                    "dsh-runtime",
+                    "app list permission request failed: ${error.javaClass.simpleName}",
+                )
+                runCatching { call.resolve(installedApplicationsPermissionResult()) }
+            }
+        }
+    }
+
+    @PermissionCallback
+    private fun installedApplicationsPermissionCallback(call: PluginCall?) {
+        call?.resolve(installedApplicationsPermissionResult())
+    }
+
+    private fun installedApplicationsPermissionResult(): JSObject = JSObject()
+        .put("supported", AppListAccess.supported(context))
+        .put("granted", AppListAccess.granted(context))
+
+    /** 权限：仅壳内桥接；查询参数有界，按页返回应用名称与包名，不返回应用数据。 */
+    @PluginMethod
+    fun listInstalledApplications(call: PluginCall) {
+        execute(call) {
+            val query = call.data.opt("query") as? String
+                ?: throw RuntimeFailure("APPLICATION_QUERY_INVALID", "应用筛选词必须是字符串")
+            val offset = call.data.opt("offset")
+            if (offset !is Number || offset.toDouble() != offset.toInt().toDouble() || offset.toInt() < 0) {
+                throw RuntimeFailure("APPLICATION_QUERY_INVALID", "应用分页参数无效")
+            }
+            try {
+                JSObject(io.deepseekharness.mobile.accessibility.InstalledApplications.list(context, query, offset.toInt()).toString())
+            } catch (_: IllegalArgumentException) {
+                throw RuntimeFailure("APPLICATION_QUERY_INVALID", "应用筛选参数无效")
+            }
+        }
+    }
+
+    /**
+     * 保存无障碍目标应用白名单；数组元素必须是字符串，原生策略再次校验包名格式与重复项（不限制条数）。
+     *
+     * 已设置「验证密码」时 `password` 必填：校验顺序与失败码全部由
+     * `AccessibilityWhitelistWritePolicy` / `AccessibilityPasswordStore` 决定（先密码、后格式），
+     * 这里只负责取值、映射失败码与审计。密码**不进**审计字段、返回值与异常文案。
+     */
+    @PluginMethod
+    fun setAccessibilityAutomationPackages(call: PluginCall) {
+        execute(call) {
+            audited(AuditEvent.ACCESSIBILITY_CONFIG) {
+                val raw = call.data.opt("packages")
+                val array = raw as? org.json.JSONArray
+                    ?: throw RuntimeFailure("ACCESSIBILITY_CONFIG_INVALID", "无障碍白名单格式无效")
+                val packages = buildList(array.length()) {
+                    for (index in 0 until array.length()) {
+                        val value = array.opt(index)
+                        if (value !is String) {
+                            throw RuntimeFailure("ACCESSIBILITY_CONFIG_INVALID", "无障碍白名单必须全部是字符串")
+                        }
+                        add(value)
+                    }
+                }
+                val password = optionalAccessibilityPassword(call.data, "password")
+                try {
+                    // 本应用恒在白名单里（`withSelf`），用户传不传都会补上；已配置密码时缺密码/错密码
+                    // 分别以 ACCESSIBILITY_PASSWORD_REQUIRED / _INVALID / _LOCKED 拒绝。
+                    val whitelistEnabled = if (call.data.has("whitelistEnabled")) {
+                        call.data.opt("whitelistEnabled") as? Boolean
+                            ?: throw RuntimeFailure("ACCESSIBILITY_CONFIG_INVALID", "无障碍白名单开关格式无效")
+                    } else null
+                    accessibilityStateToJs(AccessibilityAutomationStore.setAllowedPackages(context, packages, password, whitelistEnabled))
+                } catch (failure: AccessibilityGuardException) {
+                    throw accessibilityGuardFailure(failure)
+                } catch (_: IllegalArgumentException) {
+                    throw RuntimeFailure("ACCESSIBILITY_CONFIG_INVALID", "无障碍白名单包含无效或重复包名")
+                }
+            }
+        }
+    }
+
+    /**
+     * 读某个应用的自动化参数（按应用暂停开关 + 新建规则时的默认值）。
+     *
+     * 权限：应用内桥接；**只读**——不写盘、不打开任何开关、不需要验证密码。白名单外的包照样读得出来，
+     * `allowed` 只是回给界面做提示（与 `getAccessibilityAutomationRules` 同一口径）。
+     *
+     * 损坏**不抛错**：返回里的 `corrupt` 非空，且 `config.paused` 为 true（fail closed，见
+     * `AccessibilityAppConfigStore` 的类注释）。这一条与规则读取不同是刻意的——规则读不出来就没有
+     * 正文可编辑，界面禁用入口即可；参数是「按应用开关」，抛错会让用户既看不到也覆盖不掉坏数据，
+     * 只能去清应用数据。
+     */
+    @PluginMethod
+    fun getAccessibilityAutomationAppConfig(call: PluginCall) {
+        execute(call) {
+            val packageName = requiredAutomationPackage(call)
+            accessibilityAppConfigToJs(packageName, AccessibilityAppConfigStore.read(context, packageName))
+        }
+    }
+
+    /**
+     * 覆盖某个应用的自动化参数（整条替换，不合并）。
+     *
+     * 权限：应用内桥接；**不需要验证密码，但必须过白名单**——与写规则同一条口径
+     * （[requireAutomationWriteAllowed]）：白名单是「这台设备允许自动化哪些应用」的边界，
+     * 改白名单要密码；改某个应用自己的暂停开关与默认值不需要，但白名单外的包一律拒写，
+     * 免得写出一个永远不会被执行的配置。
+     *
+     * 四个字段全给：缺一个就拒收，**不拿默认值补**。「我只想改暂停」的调用方应该先读一次再整条写回，
+     * 静默补默认值会把用户配好的数字顺手冲掉。
+     */
+    @PluginMethod
+    fun setAccessibilityAutomationAppConfig(call: PluginCall) {
+        execute(call) {
+            audited(AuditEvent.ACCESSIBILITY_CONFIG) {
+                val packageName = requiredAutomationPackage(call)
+                requireAutomationWriteAllowed(packageName)
+                val paused = call.data.opt("paused") as? Boolean
+                    ?: throw RuntimeFailure("ACCESSIBILITY_CONFIG_INVALID", "按应用暂停开关必须是布尔值")
+                val config = AccessibilityAppConfig(
+                    paused = paused,
+                    defaultMaxActions = requiredAutomationInt(call, "defaultMaxActions", "每应用默认动作上限"),
+                    defaultActionCoolDownMs = requiredAutomationInt(call, "defaultActionCoolDownMs", "每应用默认冷却时间"),
+                    defaultMatchDelayMs = requiredAutomationInt(call, "defaultMatchDelayMs", "每应用默认匹配延迟"),
+                )
+                try {
+                    AccessibilityAppConfigStore.write(context, packageName, config)
+                } catch (failure: IllegalArgumentException) {
+                    // 越界文案由存储层给出（数字取自 AutomationRuleLimits），这里只换受控码。
+                    throw RuntimeFailure("ACCESSIBILITY_CONFIG_INVALID", failure.message ?: "每应用参数无效")
+                }
+                accessibilityAppConfigToJs(packageName, AccessibilityAppConfigStore.read(context, packageName))
+            }
+        }
+    }
+
+    /** 把每应用参数渲染成界面读数；`corrupt` 非空表示读不出来（此时 `config.paused` 恒为 true）。 */
+    private fun accessibilityAppConfigToJs(packageName: String, read: AccessibilityAppConfigRead): JSObject {
+        val config = when (read) {
+            is AccessibilityAppConfigRead.Ok -> read.config
+            is AccessibilityAppConfigRead.Corrupt -> read.config
+        }
+        val corrupt = (read as? AccessibilityAppConfigRead.Corrupt)?.let {
+            JSObject().put("code", "ACCESSIBILITY_CONFIG_CORRUPT").put("message", it.message)
+        }
+        return JSObject()
+            .put("packageName", packageName)
+            .put("allowed", AccessibilityAutomationStore.packageAllowed(context, packageName))
+            .put("corrupt", corrupt ?: org.json.JSONObject.NULL)
+            .put(
+                "config",
+                JSObject()
+                    .put(AccessibilityAppConfig.KEY_PAUSED, config.paused)
+                    .put(AccessibilityAppConfig.KEY_MAX_ACTIONS, config.defaultMaxActions)
+                    .put(AccessibilityAppConfig.KEY_COOLDOWN_MS, config.defaultActionCoolDownMs)
+                    .put(AccessibilityAppConfig.KEY_MATCH_DELAY_MS, config.defaultMatchDelayMs),
+            )
+    }
+
+    /** 必填的整数参数：小数、字符串、超范围一律拒收，绝不静默取整或夹到边界值。 */
+    private fun requiredAutomationInt(call: PluginCall, name: String, label: String): Int {
+        val value = call.data.opt(name)
+            ?: throw RuntimeFailure("ACCESSIBILITY_CONFIG_INVALID", "缺少$label")
+        if (value !is Number || value.toDouble() != value.toInt().toDouble()) {
+            throw RuntimeFailure("ACCESSIBILITY_CONFIG_INVALID", "$label 必须是整数")
+        }
+        return value.toInt()
+    }
+
+    /**
+     * 权限：应用内桥接；设置或修改「无障碍白名单验证密码」。
+     *
+     * 首次设置不需要 `currentPassword`；已设置过的必须先通过当前密码（含锁定与失败计数）。
+     * `password` 只作为 PBKDF2 入参使用，**不落盘明文、不进审计与诊断、不进返回值**——
+     * 返回的是与读写白名单同一形状的状态（只有 `passwordConfigured` 这个布尔）。
+     */
+    @PluginMethod
+    fun setAccessibilityPassword(call: PluginCall) {
+        execute(call) {
+            val password = requiredAccessibilityPassword(call.data, "password")
+            val currentPassword = optionalAccessibilityPassword(call.data, "currentPassword")
+            audited(AuditEvent.ACCESSIBILITY_CONFIG) {
+                try {
+                    AccessibilityPasswordStore.set(context, password, currentPassword)
+                } catch (failure: AccessibilityGuardException) {
+                    throw accessibilityGuardFailure(failure)
+                } catch (failure: IllegalArgumentException) {
+                    // 只可能是「还没设过密码却传了 currentPassword」这类参数矛盾；文案是固定字面量。
+                    throw RuntimeFailure("ACCESSIBILITY_CONFIG_INVALID", failure.message ?: "无障碍验证密码参数无效")
+                }
+                accessibilityStateToJs(AccessibilityAutomationStore.state(context))
+            }
+        }
+    }
+
+    /**
+     * 权限：应用内桥接；清除验证密码（必须带当前密码）。
+     *
+     * **只清密码，白名单原样保留**：用户想撤销的是「每次改白名单都要输密码」这件事，
+     * 不是自己配好的目标应用清单。忘记密码走 [resetAccessibilityPasswordWithBiometric]。
+     */
+    @PluginMethod
+    fun clearAccessibilityPassword(call: PluginCall) {
+        execute(call) {
+            val currentPassword = requiredAccessibilityPassword(call.data, "currentPassword")
+            audited(AuditEvent.ACCESSIBILITY_CONFIG) {
+                try {
+                    AccessibilityPasswordStore.clear(context, currentPassword)
+                } catch (failure: AccessibilityGuardException) {
+                    throw accessibilityGuardFailure(failure)
+                }
+                accessibilityStateToJs(AccessibilityAutomationStore.state(context))
+            }
+        }
+    }
+
+    /**
+     * 权限：应用内桥接；忘记验证密码的唯一恢复路径——由**系统界面**确认身份。
+     *
+     * 确认结果只可能来自系统：API 30+ 用 `BiometricPrompt` 且允许
+     * `BIOMETRIC_STRONG or DEVICE_CREDENTIAL`（带设备凭据时不能设负按钮，系统会用「取消」项）；
+     * API 26–29 不允许这个组合，因此直接用 `KeyguardManager` 的确认凭据界面
+     * （二选一的理由：那条路上 androidx 的 `DEVICE_CREDENTIAL` 兜底走的也是同一把系统界面，
+     * 与其多一层间接，不如把「通过/取消」当成唯一的两个结果）。两条路都只拿到结果，
+     * 应用侧无法伪造确认，也无法读到用户的生物特征或锁屏密码。
+     *
+     * 通过后只清密码与失败计数，白名单保留。
+     */
+    @PluginMethod
+    fun resetAccessibilityPasswordWithBiometric(call: PluginCall) {
+        val currentActivity = activity
+        if (currentActivity == null) {
+            call.reject("当前没有可用的界面，无法进行系统身份确认", AccessibilityBiometricCodes.UNAVAILABLE)
+            return
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            requestBiometricPasswordReset(currentActivity, call)
+        } else {
+            requestDeviceCredentialPasswordReset(currentActivity, call)
+        }
+    }
+
+    /**
+     * API 30+：系统生物识别或锁屏密码。
+     *
+     * `BiometricPrompt` 的引用由 [pendingBiometricResetPrompt] 持有：平台要求调用方保留它，
+     * 同时它也是「上一次确认还没结束」的唯一标记——用户连点两次时，旧的一次会被取消并回报
+     * `BIOMETRIC_CANCELLED`，而不是让两次确认的结果落到同一个调用上。
+     */
+    private fun requestBiometricPasswordReset(currentActivity: android.app.Activity, call: PluginCall) {
+        val fragmentActivity = currentActivity as? androidx.fragment.app.FragmentActivity
+        if (fragmentActivity == null) {
+            call.reject("当前界面不支持系统身份确认", AccessibilityBiometricCodes.UNAVAILABLE)
+            return
+        }
+        val manager = BiometricManager.from(fragmentActivity)
+        val authenticators = BiometricManager.Authenticators.BIOMETRIC_STRONG or
+            BiometricManager.Authenticators.DEVICE_CREDENTIAL
+        if (manager.canAuthenticate(authenticators) != BiometricManager.BIOMETRIC_SUCCESS) {
+            call.reject("设备上没有可用的生物识别或锁屏密码", AccessibilityBiometricCodes.UNAVAILABLE)
+            return
+        }
+        // 上一次确认还开着就先取消：它自己的回调会带着它的调用报 BIOMETRIC_CANCELLED，
+        // 两次点击因此各自结清，不会有一个调用永远挂着。
+        pendingBiometricResetPrompt?.cancelAuthentication()
+        lateinit var prompt: BiometricPrompt
+        prompt = BiometricPrompt(
+            fragmentActivity,
+            ContextCompat.getMainExecutor(fragmentActivity),
+            object : BiometricPrompt.AuthenticationCallback() {
+                override fun onAuthenticationSucceeded(result: BiometricPrompt.AuthenticationResult) {
+                    clearPendingBiometricReset(prompt)
+                    execute(call) {
+                        audited(AuditEvent.ACCESSIBILITY_CONFIG) { resetAccessibilityPasswordAfterConfirmation() }
+                    }
+                }
+
+                override fun onAuthenticationError(errorCode: Int, errString: CharSequence) {
+                    clearPendingBiometricReset(prompt)
+                    call.reject(
+                        "系统身份确认未通过",
+                        if (errorCode == BiometricPrompt.ERROR_USER_CANCELED ||
+                            errorCode == BiometricPrompt.ERROR_NEGATIVE_BUTTON ||
+                            errorCode == BiometricPrompt.ERROR_CANCELED
+                        ) {
+                            AccessibilityBiometricCodes.CANCELLED
+                        } else {
+                            AccessibilityBiometricCodes.FAILED
+                        },
+                    )
+                }
+            },
+        )
+        pendingBiometricResetPrompt = prompt
+        val info = BiometricPrompt.PromptInfo.Builder()
+            .setTitle("确认身份")
+            .setSubtitle("通过后清除无障碍验证密码（白名单保留）")
+            .setAllowedAuthenticators(authenticators)
+            .build()
+        fragmentActivity.runOnUiThread {
+            try {
+                prompt.authenticate(info)
+            } catch (_: Throwable) {
+                clearPendingBiometricReset(prompt)
+                call.reject("设备上没有可用的身份确认界面", AccessibilityBiometricCodes.UNAVAILABLE)
+            }
+        }
+    }
+
+    /**
+     * API 26–29：系统确认凭据界面（`KeyguardManager`）。
+     *
+     * 与 SAF 目录选择器同一条范式：主线程发起、`@ActivityCallback` 收结果。设备没有锁屏密码时
+     * 系统直接给不出确认界面，如实报 `BIOMETRIC_UNAVAILABLE`，不退化成「直接放行」。
+     */
+    @Suppress("DEPRECATION")
+    private fun requestDeviceCredentialPasswordReset(currentActivity: android.app.Activity, call: PluginCall) {
+        val keyguard = currentActivity.getSystemService(KeyguardManager::class.java)
+        val intent = keyguard?.createConfirmDeviceCredentialIntent(
+            "确认身份",
+            "通过后清除无障碍验证密码（白名单保留）",
+        )
+        if (intent == null) {
+            call.reject("设备未设置锁屏密码，无法确认身份", AccessibilityBiometricCodes.UNAVAILABLE)
+            return
+        }
+        currentActivity.runOnUiThread {
+            try {
+                startActivityForResult(call, intent, "accessibilityPasswordResetConfirmed")
+            } catch (_: Throwable) {
+                call.reject("设备上没有可用的身份确认界面", AccessibilityBiometricCodes.UNAVAILABLE)
+            }
+        }
+    }
+
+    /** 系统锁屏密码确认回调（API 26–29 那条路）：只有 `RESULT_OK` 才算确认。 */
+    @ActivityCallback
+    private fun accessibilityPasswordResetConfirmed(call: PluginCall?, result: ActivityResult) {
+        if (call == null) return
+        if (result.resultCode != android.app.Activity.RESULT_OK) {
+            call.reject("已取消系统身份确认", AccessibilityBiometricCodes.CANCELLED)
+            return
+        }
+        execute(call) {
+            audited(AuditEvent.ACCESSIBILITY_CONFIG) { resetAccessibilityPasswordAfterConfirmation() }
+        }
+    }
+
+    /**
+     * 系统身份确认通过后的唯一后续：清密码与失败计数、**保留白名单**，回报新的状态。
+     *
+     * 除了上面两个回调，没有别的调用点——桥上也不提供任何「不验证就能重置密码」的方法。
+     */
+    private fun resetAccessibilityPasswordAfterConfirmation(): JSObject {
+        AccessibilityPasswordStore.resetAfterDeviceConfirmation(context)
+        return accessibilityStateToJs(AccessibilityAutomationStore.state(context))
+    }
+
+    /**
+     * 结清一次系统身份确认的引用（只做簿记，不决定要不要回报结果）。
+     *
+     * 每个回调只结清自己的那一次调用：用户连点两次时，被取消的那一次如实报
+     * `BIOMETRIC_CANCELLED`，不会因为「当前提示已经不是它」而永远挂着；
+     * 这里只保证字段不会停在已经作废的那个提示上。
+     */
+    private fun clearPendingBiometricReset(prompt: BiometricPrompt) {
+        if (pendingBiometricResetPrompt === prompt) pendingBiometricResetPrompt = null
+    }
+
+    /** 只跳转系统设置，由用户手动开启或关闭无障碍服务。 */
+    @PluginMethod
+    fun openAccessibilitySettings(call: PluginCall) {
+        resolveWhileActive(call) {
+            audited(AuditEvent.ACCESSIBILITY_CONFIG) {
+                AccessibilityAutomationStore.openSettings(context)
+                null
+            }
+        }
+    }
+
+    /** 权限：应用内桥接；浏览固定 inbox/outbox 根目录下的相对目录。 */
+    @PluginMethod
+    fun mailboxDirectory(call: PluginCall) {
+        execute(call) {
+            val root = requiredMailboxRoot(call.data)
+            val subdirectory = optionalMailboxSubdirectory(call.data)
+            RuntimeMailbox(controller.store).listDirectory(root, subdirectory).toJs()
+        }
+    }
+
+    /** 权限：应用内桥接；在固定投递区根目录下创建相对目录，不覆盖已有条目。 */
+    @PluginMethod
+    fun createMailboxFolder(call: PluginCall) {
+        execute(call) {
+            val root = requiredMailboxRoot(call.data)
+            val subdirectory = optionalMailboxSubdirectory(call.data)
+                ?: throw RuntimeFailure("MAILBOX_PATH_INVALID", "投递区新目录路径不能为空")
+            RuntimeMailbox(controller.store).createDirectory(root, subdirectory).toJs()
+        }
+    }
+
+    /**
+     * 权限：应用内桥接。
+     *
+     * 一键导入：inbox 的 tar → 工作区 `mailbox-import/`。
+     * 越界（`..` / 绝对路径 / 绝对符号链接）、超限、重复条目与摘要不符，全部在写第一个字节
+     * **之前**被拒绝；解包先落到应用私有暂存目录，最后整体改名就位，因此失败不留半截产物。
+     * 重复执行是幂等的：落点被整体替换，不会产生第二份条目。
+     */
+    @PluginMethod
+    fun importMailbox(call: PluginCall) {
+        execute(call) {
+            val guestPath = optionalStorageGuestPath(call.data)
+            val root = optionalMailboxRoot(call.data)
+            val sourceDirectory = optionalMailboxDirectory(call.data, "sourceDirectory")
+            // 先拿到结果对象再转成 JS 载荷：搬运工作区（大工作区要几十秒）属于用户主动发起、
+            // 且很可能在他切走之后才完成的操作，因此要发一条完成通知（登记册 §5.5 第二类）。
+            val outcome = audited(AuditEvent.MAILBOX_IMPORT) {
+                val mailbox = RuntimeMailbox(controller.store)
+                if (guestPath != null) {
+                    val resolved = storageDirs().resolveDirectory(guestPath, sourceDirectory)
+                    mailbox.importFromDirectory(resolved)
+                } else {
+                    mailbox.importInbox(
+                        sourceDirectory = sourceDirectory,
+                        rootName = root ?: RuntimeMailboxLayout.INBOX_DIRECTORY,
+                    )
+                }
+            }
+            TaskNotification.postWorkspaceImported(context, outcome.entryCount)
+            outcome.toJs()
+        }
+    }
+
+    /**
+     * 权限：应用内桥接；`subdirectory` 省略或留空表示导出整个工作区。
+     *
+     * 一键导出：工作区（或指定子目录）→ 投递区或已授权共享目录的 `dsh-workspace.tar` +
+     * `dsh-workspace.manifest.json` + `dsh-workspace.tar.sha256`。三个文件名固定，
+     * 重复执行只覆盖同一组产物，不会在同一目录里堆出多份。
+     */
+    @PluginMethod
+    fun exportMailbox(call: PluginCall) {
+        execute(call) {
+            val subdirectory = optionalMailboxSubdirectory(call.data)
+            val destinationDirectory = optionalMailboxDirectory(call.data, "destinationDirectory")
+            val guestPath = optionalStorageGuestPath(call.data)
+            val root = optionalMailboxRoot(call.data)
+            val outcome = audited(AuditEvent.MAILBOX_EXPORT) {
+                val mailbox = RuntimeMailbox(controller.store)
+                if (guestPath != null) {
+                    val normalizedDestination = RuntimeMailboxPolicy.normalizeSubdirectory(
+                        destinationDirectory,
+                        StorageDirCodes.PATH_INVALID,
+                        "存储目录路径无效",
+                    )
+                    val resolved = storageDirs().resolveDirectory(guestPath, normalizedDestination)
+                    mailbox.exportWorkspaceToDirectory(subdirectory, resolved, normalizedDestination)
+                } else {
+                    mailbox.exportWorkspace(
+                        subdirectory = subdirectory,
+                        destinationDirectory = destinationDirectory,
+                        rootName = root ?: RuntimeMailboxLayout.OUTBOX_DIRECTORY,
+                    )
+                }
+            }
+            TaskNotification.postWorkspaceExported(context, outcome.entryCount)
+            outcome.toJs()
+        }
+    }
+
+    /**
+     * 权限：应用内桥接。
+     *
+     * ≤8 目录白名单状态：每条的用户可见路径、展示名、访客挂载点 `/mnt/user/<序号>`、可用性与
+     * 不可用时的受控错误码，以及上限与权限档。
+     *
+     * **序号来自持久化槽位**：某条目录失效或被删除时只跳过该条（访客里留下空洞），不重排 —— 否则一次
+     * 失效就会让别的条目换到另一个挂载点上。**不含**应用私有路径、rootfs 路径或文件内容。
+     */
+    @PluginMethod
+    fun storageDirsState(call: PluginCall) {
+        resolveWhileActive(call) { storageDirs().state().toJs() }
+    }
+
+    /**
+     * 权限：应用内桥接。
+     *
+     * 新增一个要绑进访客的目录：Android 侧弹 SAF 目录选择器（`ACTION_OPEN_DOCUMENT_TREE`），
+     * 回调里做「document id → 真实路径 → 白名单准入」全套校验，**全部通过才落盘**。
+     *
+     * 拒绝一律给受控错误码（非 primary 卷、共享存储根、Android/、应用私有目录、符号链接逃逸、
+     * 重复、超限、路径含运行时不支持的字符），失败不写入任何东西。用户取消返回
+     * `STORAGE_DIR_CANCELLED`，界面据此不当作故障。
+     */
+    @PluginMethod
+    fun addStorageDirectory(call: PluginCall) {
+        val currentActivity = activity
+        if (currentActivity == null) {
+            call.reject("当前没有可用的界面，无法打开目录选择器", StorageDirCodes.PICKER_UNAVAILABLE)
+            return
+        }
+        /*
+         * 前置判档要拿 lifecycleLock（`withStorageDirsMutation`），必须放到后台执行器：
+         * 冷启动/安装期间该锁最长被持有 120s，占着串行桥线程等它会让所有桥调用一起卡住。
+         * 选择器本身仍回到主线程发起（见下）。
+         */
+        execute(call) {
+            try {
+                // 先判档位再弹选择器：让用户白点一次目录、回来才被告知「需要授权」是纯粹的浪费，
+                // 而判定规则仍然只有白名单门面那一份（这里不重复实现）。
+                storageDirs().requireReady()
+                controller.withStorageDirsMutation { Unit }
+            } catch (failure: RuntimeFailure) {
+                throw failure
+            }
+            val intent = Intent(Intent.ACTION_OPEN_DOCUMENT_TREE).apply {
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                addFlags(Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
+            }
+            // 启动选择器必须从主线程发起（同 requestMediaPermission）。
+            currentActivity.runOnUiThread {
+                try {
+                    startActivityForResult(call, intent, "storageDirectoryPicked")
+                } catch (_: Throwable) {
+                    // 部分精简 ROM 没有文件选择器：如实报「没有可用入口」，而不是静默什么都不发生。
+                    call.reject("设备上没有可用的目录选择器", StorageDirCodes.PICKER_UNAVAILABLE)
+                }
+            }
+            // 结果由 storageDirectoryPicked 回填：这里不能 resolve，否则前端会先收到一个空答复。
+            null
+        }
+    }
+
+    /**
+     * SAF 目录选择器回调。
+     *
+     * 这里**刻意不调用 `takePersistableUriPermission`**：白名单存的是解析后的真实路径，
+     * 之后再也不碰 tree URI，持久化一份用不到的授权只会多出一条不随白名单条目一起消失的访问路径。
+     * 决定权在用户（存的是用户点过的目录），而实际读写能力来自 T2 的「所有文件访问」。
+     */
+    @ActivityCallback
+    private fun storageDirectoryPicked(call: PluginCall?, result: ActivityResult) {
+        if (call == null) return
+        val uri = result.data?.data
+        if (result.resultCode != android.app.Activity.RESULT_OK || uri == null) {
+            call.reject("已取消目录选择", StorageDirCodes.CANCELLED)
+            return
+        }
+        val documentId = try {
+            DocumentsContract.getTreeDocumentId(uri)
+        } catch (_: Throwable) {
+            call.reject("目录选择结果不是可识别的目录树", StorageDirCodes.DOCUMENT_ID_INVALID)
+            return
+        }
+        // 解析与落盘放到执行器上：canonicalFile 与目录探测都要碰文件系统。
+        // execute 支持「稍后 resolve」——回调此刻返回不影响这条调用最终的结果。
+        execute(call) {
+            audited(AuditEvent.STORAGE_DIR_ADD) {
+                controller.withStorageDirsMutation { storageDirs().add(documentId).toJs() }
+            }
+        }
+    }
+
+    /**
+     * 权限：应用内桥接；按 `path` 移除一条白名单目录（`path` 取自 [storageDirsState] 的条目）。
+     *
+     * 用路径而不是序号作为标识：序号会因增删而变，用序号删除可能删掉另一条目录。
+     * 不在白名单里时如实报 `STORAGE_DIR_NOT_FOUND`，不做「看起来成功」的空操作。
+     */
+    @PluginMethod
+    fun removeStorageDirectory(call: PluginCall) {
+        execute(call) {
+            val path = call.getString("path")?.takeIf { it.isNotEmpty() }
+                ?: throw RuntimeFailure(StorageDirCodes.PATH_REQUIRED, "存储目录路径缺失")
+            audited(AuditEvent.STORAGE_DIR_REMOVE) {
+                controller.withStorageDirsMutation { storageDirs().remove(path).toJs() }
+            }
+        }
+    }
+
+    /**
+     * 权限：应用内桥接；浏览共享目录白名单里某一条目录下的相对目录。
+     *
+     * 与 [mailboxDirectory] **同形状**——前端用同一个文件浏览组件打开投递区与共享目录：
+     * 入参 `guestPath`（`/mnt/user/<序号>`，取自 [storageDirsState] 条目里的同名字段）+
+     * 可选 `subdirectory`；返回 `{ guestPath, path, entries, truncated }`，条目的线形状与投递区
+     * 逐字相同（`{ name, kind, bytes }`，`kind` 为 `directory` / `file`）。
+     *
+     * **序号语义是持久化槽位**：`/mnt/user/3` 永远指槽位 3，不因别的条目失效或被删除而重排，
+     * 因此前端可以放心把它当成稳定标识。
+     */
+    @PluginMethod
+    fun storageDirectory(call: PluginCall) {
+        execute(call) {
+            val guestPath = requiredStorageGuestPath(call.data)
+            val subdirectory = optionalStorageSubdirectory(call.data)
+            storageDirs().directory(guestPath, subdirectory).toJs()
+        }
+    }
+
+    /**
+     * 权限：应用内桥接；在共享目录白名单的某一条目录下新建子目录。
+     *
+     * 与 [createMailboxFolder] 行为对齐：校验通过才创建，建完即回一份**新的列举快照**
+     * （同一个 `guestPath`，`path` 指向新目录），前端不必再发一次浏览请求。
+     *
+     * 规则与投递区完全共用（`RuntimeDirectoryBrowser` + `RuntimeMailboxPolicy`）：
+     * 父目录可按需创建，目标已存在时报 `STORAGE_DIR_FOLDER_EXISTS`，绝不覆盖用户已有的东西。
+     */
+    @PluginMethod
+    fun createStorageFolder(call: PluginCall) {
+        execute(call) {
+            val guestPath = requiredStorageGuestPath(call.data)
+            val subdirectory = optionalStorageSubdirectory(call.data)
+                ?: throw RuntimeFailure(StorageDirCodes.PATH_INVALID, "存储目录新目录路径不能为空")
+            storageDirs().createFolder(guestPath, subdirectory).toJs()
+        }
+    }
+
+    /**
+     * 权限：应用内桥接；把文件管理页当前目录中的一个普通文件交给系统。
+     *
+     * 宿主路径永远不从 JS 传入：mailbox 只接受固定 root，storage 只接受白名单 guestPath；
+     * 相对文件路径由同一套 NoFollow 目录浏览策略解析后复制到 cache，再通过 FileProvider 暴露。
+     */
+    @PluginMethod
+    fun externalFileAction(call: PluginCall) {
+        execute(call) {
+            val source = call.data.opt("source") as? String
+                ?: throw RuntimeFailure("EXTERNAL_FILE_INVALID", "外部文件来源缺失")
+            val action = call.data.opt("action") as? String
+                ?: throw RuntimeFailure("EXTERNAL_FILE_INVALID", "外部文件动作缺失")
+            if (source != "mailbox" && source != "storage") {
+                throw RuntimeFailure("EXTERNAL_FILE_INVALID", "外部文件来源无效")
+            }
+            if (action != "share" && action != "open") {
+                throw RuntimeFailure("EXTERNAL_FILE_INVALID", "外部文件动作无效")
+            }
+            val relative = call.data.opt("path") as? String
+                ?: throw RuntimeFailure("EXTERNAL_FILE_INVALID", "外部文件路径缺失")
+            val target = if (source == "mailbox") {
+                val root = call.data.opt("root") as? String
+                    ?: throw RuntimeFailure("MAILBOX_ROOT_INVALID", "投递区根目录缺失")
+                RuntimeMailbox(controller.store).copyFileForSharing(root, relative, context.cacheDir)
+            } else {
+                val guestPath = call.data.opt("guestPath") as? String
+                    ?: throw RuntimeFailure(StorageDirCodes.PATH_INVALID, "共享目录访客路径缺失")
+                storageDirs().copyFileForSharing(guestPath, relative, context.cacheDir)
+            }
+            try {
+                val mime = MimeTypeMap.getSingleton()
+                    .getMimeTypeFromExtension(relative.substringAfterLast('.', "").lowercase())
+                    ?: "application/octet-stream"
+                val uri = FileProvider.getUriForFile(context, "${context.packageName}.diagnostics", target)
+                val intent = Intent(if (action == "open") Intent.ACTION_VIEW else Intent.ACTION_SEND).apply {
+                    if (action == "open") setDataAndType(uri, mime) else {
+                        type = mime
+                        putExtra(Intent.EXTRA_STREAM, uri)
+                    }
+                    clipData = ClipData.newRawUri(target.name, uri)
+                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                }
+                if (intent.resolveActivity(context.packageManager) == null) {
+                    throw RuntimeFailure("EXTERNAL_FILE_NO_HANDLER", "没有应用可以处理此文件")
+                }
+                context.startActivity(
+                    Intent.createChooser(intent, if (action == "open") "打开 DSH 文件" else "分享 DSH 文件")
+                        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+                )
+            } catch (failure: RuntimeFailure) {
+                target.delete()
+                throw failure
+            } catch (error: Throwable) {
+                target.delete()
+                throw RuntimeFailure("EXTERNAL_FILE_ACTION_FAILED", "无法打开系统文件操作面板", error)
+            }
+            null
+        }
+    }
+
+    /**
+     * 权限：应用内桥接；仅申请相册/视频的媒体读取权限。
+     * Android 13 起用 READ_MEDIA_*，12 及以下用 READ_EXTERNAL_STORAGE；被拒绝只返回结果，
+     * 不阻断其他功能（容器仍可读应用私有目录）。
+     */
+    @PluginMethod
+    fun requestMediaPermission(call: PluginCall) {
+        val currentActivity = activity
+        if (currentActivity == null) {
+            call.resolve(JSObject().put("granted", mediaPermissionGranted()))
+            return
+        }
+        val aliases = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            arrayOf(MEDIA_IMAGES_ALIAS, MEDIA_VIDEO_ALIAS)
+        } else {
+            arrayOf(LEGACY_STORAGE_ALIAS)
+        }
+        // Capacitor 的插件方法运行在桥接线程上，而权限申请必须从主线程发起。
+        currentActivity.runOnUiThread {
+            // 与通知权限同一道防线：ROM 改造 / Activity 重建竞态下 launcher 路径可能抛
+            // NullPointerException，逃到主线程会直接闪退；失败时按真实授权状态结清。
+            try {
+                requestPermissionForAliases(aliases, call, "mediaPermissionCallback")
+            } catch (error: Throwable) {
+                android.util.Log.w(
+                    "dsh-runtime",
+                    "media permission request failed: ${error.javaClass.simpleName}",
+                )
+                runCatching { call.resolve(JSObject().put("granted", mediaPermissionGranted())) }
+            }
+        }
+    }
+
+    @PermissionCallback
+    private fun mediaPermissionCallback(call: PluginCall?) {
+        call?.resolve(JSObject().put("granted", mediaPermissionGranted()))
+    }
+
+    /**
+     * 悬浮球开关、系统悬浮窗权限与服务运行状态的当前快照。
+     *
+     * 返回值只有布尔量与受控错误令牌，不含任何用户数据。`canDrawOverlays` 必须每次实时读取：
+     * 用户可能在系统设置里随时撤销，缓存下来会让界面显示错误状态。
+     * `startError` 是最近一次启动失败的原因令牌：服务已在运行或从未失败时为 null，
+     * 界面据此区分「缺权限」与「被厂商后台策略拒绝」并给出对应的指引。
+     */
+    @PluginMethod
+    fun overlayBallState(call: PluginCall) {
+        execute(call) { overlayBallStateJson() }
+    }
+
+    /** 单字段立即落盘，不等待运行时生命周期锁或页面退出。 */
+    @PluginMethod
+    fun setOverlayBallEnabled(call: PluginCall) {
+        execute(call) {
+            overlayBallOperationLock.withLock {
+                val enabled = call.data.opt("enabled") as? Boolean
+                    ?: throw RuntimeFailure("SETTINGS_INVALID", "悬浮球开关格式无效")
+                val canDraw = android.provider.Settings.canDrawOverlays(context)
+                controller.store.setOverlayBallEnabled(enabled)
+                syncOverlayBallService(controller.store.overlayBallEnabled(), canDraw)
+                overlayBallStateJson(canDraw)
+            }
+        }
+    }
+
+    private fun overlayBallStateJson(canDraw: Boolean = android.provider.Settings.canDrawOverlays(context)): JSObject {
+        val serviceActive = OverlayBallService.isRunning
+        return JSObject()
+            .put("enabled", controller.store.overlayBallEnabled())
+            .put("canDrawOverlays", canDraw)
+            .put("serviceActive", serviceActive)
+            .put("startError", OverlayBallService.lastStartFailure?.takeUnless { serviceActive })
+    }
+
+    /**
+     * 引导用户到本应用的系统通知设置页（Android 13+ 通知权限只能由用户手动授予）。
+     *
+     * 部分 ROM 没有通知渠道设置页时逐级回退：应用详情页 → 抛出受控失败码，
+     * 由界面提示用户手动进入「设置 → 通知」。
+     */
+    @PluginMethod
+    fun openNotificationSettings(call: PluginCall) {
+        execute(call) {
+            runCatching { TaskNotification.ensureActiveChannel(context) }
+            val intents = buildList {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    add(
+                        Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS)
+                            .putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName),
+                    )
+                }
+                add(
+                    Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS)
+                        .setData(android.net.Uri.parse("package:${context.packageName}")),
+                )
+            }.map { it.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK) }
+            launchNotificationSettingsOrThrow(intents)
+            null
+        }
+    }
+
+    /** 跳转到系统实况动态 / 超级岛相关通知设置页；系统无独立页面时自动回退到应用通知设置。 */
+    @PluginMethod
+    fun openPromotedNotificationSettings(call: PluginCall) {
+        execute(call) {
+            runCatching { TaskNotification.ensureActiveChannel(context) }
+            launchNotificationSettingsOrThrow(
+                TaskLiveNotificationCompat.buildPromotionSettingsIntents(context.packageName),
+            )
+            null
+        }
+    }
+
+    private fun launchNotificationSettingsOrThrow(intents: List<Intent>) {
+        val opened = intents.any { candidate ->
+            runCatching { context.startActivity(candidate) }.isSuccess
+        }
+        if (!opened) {
+            throw RuntimeFailure(
+                "NOTIFICATION_SETTINGS_UNAVAILABLE",
+                "无法打开系统通知设置页",
+            )
+        }
+    }
+
+    /**
+     * 引导用户到本应用的系统详情页（应用信息）。
+     *
+     * 厂商 ROM 的「省电策略 / 后台运行 / 自启动」入口都挂在应用详情页下，
+     * 但没有稳定的公开 Intent 可以直达具体 ROM 页面；先把用户送到详情页，
+     * 由界面文案告诉他点哪一项。打不开时返回受控失败码而不是让调用悬空。
+     */
+    @PluginMethod
+    fun openApplicationSettings(call: PluginCall) {
+        execute(call) {
+            val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS)
+                .setData(Uri.parse("package:${context.packageName}"))
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            val opened = runCatching { context.startActivity(intent) }.isSuccess
+            if (!opened) {
+                throw RuntimeFailure(
+                    "APPLICATION_SETTINGS_UNAVAILABLE",
+                    "无法打开应用详情设置页",
+                )
+            }
+            null
+        }
+    }
+
+    /**
+     * 引导用户到「显示在其他应用上层」设置页。
+     *
+     * 该权限不弹运行时对话框，只能由用户手动开启；本方法只负责跳转，
+     * 授权结果由界面在 onResume 后重新查询 [overlayBallState] 获得。
+     */
+    @PluginMethod
+    fun openOverlaySettings(call: PluginCall) {
+        execute(call) {
+            val intent = Intent(
+                android.provider.Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                android.net.Uri.parse("package:${context.packageName}"),
+            ).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            try {
+                context.startActivity(intent)
+            } catch (_: Throwable) {
+                // 部分 ROM 没有该设置页：退回应用详情页，至少让用户能进系统设置。
+                try {
+                    context.startActivity(
+                        Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS)
+                            .setData(android.net.Uri.parse("package:${context.packageName}"))
+                            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+                    )
+                } catch (fallbackError: Throwable) {
+                    throw RuntimeFailure(
+                        "OVERLAY_SETTINGS_UNAVAILABLE",
+                        "无法打开系统设置页",
+                        fallbackError,
+                    )
+                }
+            }
+            null
+        }
+    }
+
+    /**
+     * 权限：应用内桥接。
+     * 「所有文件访问」是特殊权限，没有运行时对话框可弹：只能跳到系统设置页由用户手动开启。
+     * Android 11 以下不存在该权限，返回 supported=false 由界面隐藏入口。
+     */
+    @PluginMethod
+    fun openAllFilesAccessSettings(call: PluginCall) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) {
+            call.resolve(JSObject().put("supported", false).put("granted", true))
+            return
+        }
+        val intent = Intent(
+            android.provider.Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION,
+            android.net.Uri.parse("package:${context.packageName}"),
+        ).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        try {
+            context.startActivity(intent)
+        } catch (error: Throwable) {
+            // 部分 ROM 没有该设置页：退回应用详情页，至少让用户能进系统设置。
+            try {
+                context.startActivity(
+                    Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS)
+                        .setData(android.net.Uri.parse("package:${context.packageName}"))
+                        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+                )
+            } catch (fallbackError: Throwable) {
+                throw RuntimeFailure("STORAGE_SETTINGS_UNAVAILABLE", "无法打开系统存储设置", fallbackError)
+            }
+        }
+        call.resolve(JSObject().put("supported", true).put("granted", allFilesAccessGranted()))
+    }
+
+    /**
+     * 运行时占用查询：运行时目录里还有多少份可回收的 `stale-*` 残留、合计多少字节。
+     *
+     * 只读：不停止运行时，也不删任何东西。载荷只有份数、字节数与一个布尔量
+     * （`truncated`：条目预算提前停止，体积只是下界），**不含路径、目录名或文件名**——
+     * 残留目录名里带版本号、时间戳与 uuid，没有理由把它交给界面或日志。
+     * 读不到也绝不抛：按 0 份 + `truncated=true` 回，界面显示的是「读不到」而不是「确认没有」。
+     */
+    @PluginMethod
+    fun getRuntimeResidue(call: PluginCall) {
+        execute(call) { residuePayload().status().toBridgeObject() }
+    }
+
+    /**
+     * 运行时占用清理：回收 `stale-*` 残留（删除失败后被改名挪到一边的整份运行时目录）。
+     *
+     * 走 [MobileRuntimeController.retireStaleResidue]，与安装收尾、显式重置共用同一套删除语义与
+     * 记账（每份一条 `phase=cleanup` 诊断行），插件层不另建清扫器。返回的是**这一次尝试**的份数与
+     * 字节数：界面想知道「还剩几份」必须重新查一次 [getRuntimeResidue]，不许拿 cleaned/failed 自算。
+     * 单份删不掉不算失败，`failed` 与 `message` 如实体现，绝不抛出。
+     */
+    @PluginMethod
+    fun cleanRuntimeResidue(call: PluginCall) {
+        execute(call) { residuePayload().clean().toBridgeObject() }
+    }
+
+    /** 查询与清理共用一份整形：盘点读运行时父目录，清理走控制器入口（两者都在 runtime 模块内可见）。 */
+    private fun residuePayload() = RuntimeResiduePayload(
+        report = { RuntimeResidueInventory(controller.store.runtimeParent).report() },
+        sweep = { controller.retireStaleResidue() },
+    )
+
+    /**
+     * 把纯 JVM 载荷（数字 / 布尔 / 受控中文说明）搬到 Capacitor 的 `JSObject` 上：只有桥层认识
+     * Capacitor 类型，`RuntimeResiduePayload` 因此能在没有 Android 的单测里直接跑
+     * （与文件顶部 `JSONObject.toJsObject()` 同一分工）。
+     */
+    private fun Map<String, Any>.toBridgeObject(): JSObject {
+        val payload = JSObject()
+        forEach { (key, value) -> payload.put(key, value) }
+        return payload
+    }
+
+    private fun mediaPermissionGranted(): Boolean = when {
+        Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU ->
+            permissionGranted(Manifest.permission.READ_MEDIA_IMAGES) ||
+                permissionGranted(Manifest.permission.READ_MEDIA_VIDEO)
+        else -> permissionGranted(Manifest.permission.READ_EXTERNAL_STORAGE)
+    }
+
+    /**
+     * 「所有文件访问」状态。
+     * Android 11 以下不存在该权限，视为无需申请（返回 true），避免界面显示成"未授权"。
+     */
+    private fun allFilesAccessGranted(): Boolean = when {
+        Build.VERSION.SDK_INT < Build.VERSION_CODES.R -> true
+        else -> try {
+            android.os.Environment.isExternalStorageManager()
+        } catch (_: Throwable) {
+            false
+        }
+    }
+
+    private fun permissionGranted(permission: String): Boolean =
+        ContextCompat.checkSelfPermission(context, permission) == PackageManager.PERMISSION_GRANTED
+
+    /**
+     * 目录白名单门面。
+     *
+     * 懒初始化：构造它要读偏好，而在插件 load 阶段读一份用户设置既没必要、也可能在
+     * 「插件注册失败」这条路径上多出一个失败点（插件注册失败的代价是整个管理界面失去原生桥）。
+     */
+    private val storageDirsFacade: RuntimeStorageDirs by lazy {
+        RuntimeStorageDirs.from(context, controller.store) { level, fields ->
+            controller.store.diagnostics.record(level, DiagnosticEvent.STORAGE_DIRS, fields)
+        }
+    }
+
+    private fun storageDirs(): RuntimeStorageDirs = storageDirsFacade
+
+    /** 存储访问状态：只有布尔与枚举，不含路径或目录内容。 */
+    private fun storageAccessStateJson(): JSObject = JSObject()
+        .put("mediaGranted", mediaPermissionGranted())
+        .put("allFilesGranted", allFilesAccessGranted())
+        // allFilesSupported=false 表示系统版本低于 Android 11，界面应隐藏「所有文件访问」入口。
+        .put("allFilesSupported", Build.VERSION.SDK_INT >= Build.VERSION_CODES.R)
+        .put("sdkInt", Build.VERSION.SDK_INT)
+
+    /**
+     * 按设置与当前运行时阶段同步前台服务。
+     * 只在用户开启且 Harness 确实由本进程运行时保持服务，避免留下无法解释的通知。
+     */
+    private fun syncKeepAliveService(keepRuntimeInBackground: Boolean) {
+        val running = controller.state().phase == RuntimePhase.RUNNING
+        val shouldRun = HarnessKeepAlivePolicy.shouldRunService(keepRuntimeInBackground, running)
+        if (shouldRun) {
+            HarnessKeepAliveService.start(context)
+        } else {
+            HarnessKeepAliveService.stop(context)
+        }
+        diagnostics()?.record(
+            DiagnosticLevel.INFO,
+            DiagnosticEvent.KEEP_ALIVE,
+            mapOf(
+                "active" to shouldRun.toString(),
+                "running" to running.toString(),
+                "enabled" to keepRuntimeInBackground.toString(),
+            ),
+        )
+    }
+
+    /**
+     * 按设置同步悬浮球服务。
+     *
+     * 与 [syncKeepAliveService] 分开：两者的启动条件互不相干，合在一起会让
+     * 「只想开悬浮球」的用户被动拉起运行时保活服务。
+     */
+    private fun syncOverlayBallService(enabled: Boolean, canDraw: Boolean = android.provider.Settings.canDrawOverlays(context)) {
+        val shouldRun = OverlayBallPolicy.shouldShowBall(enabled, canDraw)
+        if (shouldRun) {
+            OverlayBallService.start(context)
+        } else {
+            OverlayBallService.stop(context)
+        }
+        // 这里有两条静默失败的路径：权限被撤销时走的是 stop，而 stopService 对未运行的
+        // 服务是空操作、不触发 onDestroy 的记录；start 内部也会吞掉系统拒绝启动前台服务的
+        // 异常。没有这条记录，「开关开着但球不出现」在诊断日志里完全查不到原因。
+        diagnostics()?.record(
+            DiagnosticLevel.INFO,
+            DiagnosticEvent.KEEP_ALIVE,
+            mapOf(
+                "reason" to "overlay_sync",
+                "active" to shouldRun.toString(),
+                "enabled" to enabled.toString(),
+                "permission" to if (canDraw) "granted" else "denied",
+                "running" to OverlayBallService.isRunning.toString(),
+            ),
+        )
+    }
+
+    /** 显式停止运行时或重置：立即撤销前台服务，由 RuntimeHost 统一收尾。 */
+    private fun stopKeepAliveService() {
+        HarnessKeepAliveService.stop(context)
+    }
+
+    private fun notificationPermissionGranted(): Boolean = when {
+        Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU -> true
+        else -> ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) ==
+            PackageManager.PERMISSION_GRANTED
+    }
+
+    /**
+     * 通知权限状态：unsupported 表示系统版本低于 Android 13；
+     * prompt 表示尚未授予（可能已拒绝，可在系统设置中开启），不代表通知一定无法显示。
+     */
+    private fun notificationPermissionState(): String = when {
+        Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU -> "unsupported"
+        notificationPermissionGranted() -> "granted"
+        else -> "prompt"
+    }
+
+    private fun execute(call: PluginCall, operation: () -> JSObject?): Boolean {
+        if (destroying.get()) {
+            rejectRuntimeClosed(call)
+            return false
+        }
+        return try {
+            executor.execute(PluginTask(call, operation))
+            true
+        } catch (_: RejectedExecutionException) {
+            rejectRuntimeClosed(call)
+            false
+        }
+    }
+
+    private fun requestHarnessStartCancellation() {
+        if (!destroying.get() && ::controller.isInitialized) {
+            controller.requestStartCancellation()
+        }
+    }
+
+    private fun resolveWhileActive(call: PluginCall, operation: () -> JSObject?) {
+        if (destroying.get()) {
+            rejectRuntimeClosed(call)
+        } else {
+            resolveSafely(call, operation)
+        }
+    }
+
+    private fun resolveSafely(call: PluginCall, operation: () -> JSObject?) {
+        try {
+            val result = operation()
+            if (result == null) call.resolve() else call.resolve(result)
+        } catch (failure: RuntimeFailure) {
+            call.reject(failure.message ?: "操作失败", failure.code)
+        } catch (_: Throwable) {
+            call.reject("本机运行时操作失败", "INTERNAL_ERROR")
+        }
+    }
+
+    private fun <T> audited(event: AuditEvent, lock: ReentrantLock = auditedOperationLock, operation: () -> T): T {
+        return lock.withLock {
+            auditedUnlocked(event, operation)
+        }
+    }
+
+    private fun <T> auditedUnlocked(event: AuditEvent, operation: () -> T): T {
+        ensurePluginActive()
+        recordAudit(event, AuditResult.STARTED)
+        return try {
+            operation().also { recordAudit(event, AuditResult.SUCCEEDED) }
+        } catch (failure: RuntimeFailure) {
+            val result = if (event == AuditEvent.RUNTIME_INSTALL && failure.code == "INSTALL_CANCELLED") {
+                AuditResult.CANCELLED
+            } else {
+                AuditResult.FAILED
+            }
+            recordAudit(event, result, failure.code)
+            throw failure
+        } catch (error: Throwable) {
+            recordAudit(event, AuditResult.FAILED, "INTERNAL_ERROR")
+            throw error
+        }
+    }
+
+    private fun requestShizukuPermissionAudited(): ShizukuState {
+        return auditedOperationLock.withLock {
+            ensurePluginActive()
+            recordAudit(AuditEvent.SHIZUKU_PERMISSION, AuditResult.STARTED)
+            try {
+                controller.requestShizukuPermission().also { state ->
+                    val result = if (state.permission == "granted") AuditResult.SUCCEEDED else AuditResult.DENIED
+                    recordAudit(AuditEvent.SHIZUKU_PERMISSION, result)
+                }
+            } catch (failure: RuntimeFailure) {
+                val result = when (failure.code) {
+                    "SHIZUKU_PERMISSION_DENIED" -> AuditResult.DENIED
+                    "SHIZUKU_PERMISSION_INTERRUPTED" -> AuditResult.CANCELLED
+                    else -> AuditResult.FAILED
+                }
+                recordAudit(AuditEvent.SHIZUKU_PERMISSION, result)
+                throw failure
+            } catch (error: Throwable) {
+                recordAudit(AuditEvent.SHIZUKU_PERMISSION, AuditResult.FAILED)
+                throw error
+            }
+        }
+    }
+
+    private fun recordAudit(event: AuditEvent, result: AuditResult, detail: String? = null) {
+        if (::auditLog.isInitialized) auditLog.record(event, result, detail)
+    }
+
+    private fun ensurePluginActive() {
+        if (destroying.get()) throw RuntimeFailure("RUNTIME_CLOSED", "本机运行时正在关闭")
+    }
+
+    private fun rejectRuntimeClosed(call: PluginCall) {
+        call.reject("本机运行时正在关闭", "RUNTIME_CLOSED")
+    }
+
+    private inner class PluginTask(
+        private val call: PluginCall,
+        private val operation: () -> JSObject?,
+    ) : Runnable {
+        override fun run() {
+            if (destroying.get()) {
+                rejectRuntimeClosed()
+            } else {
+                resolveSafely(call) {
+                    ensurePluginActive()
+                    operation()
+                }
+            }
+        }
+
+        fun rejectRuntimeClosed() {
+            this@MobileRuntimePlugin.rejectRuntimeClosed(call)
+        }
+    }
+
+    /**
+     * WebView 侧事件出口：只在插件仍然存活时派发。
+     * 插件销毁后运行时可能仍由前台服务持有，此时事件被安全丢弃——不缓存、不落盘。
+     */
+    private inner class PluginEventSink : RuntimeEventSink {
+        override fun onProgress(snapshot: RuntimeStateSnapshot) {
+            if (!destroying.get()) notifyListeners("runtimeProgress", snapshot.toProgressJs())
+        }
+
+        override fun onHarnessProgress(stage: String, percent: Int) {
+            if (!destroying.get()) {
+                notifyListeners("harnessProgress", JSObject().put("stage", stage).put("percent", percent))
+            }
+        }
+
+        override fun onTerminalOutput(sessionId: String, dataBase64: String, suppressPublicOutput: Boolean) {
+            dispatchTerminalOutput(
+                sessionId,
+                dataBase64,
+                suppressPublicOutput,
+                onDeviceCommandOutput = { id, data ->
+                    // 热路径：没有执行器时不要顺手创建（未授权设备 Shell 时永远用不到）。
+                    RuntimeHost.deviceCommandsOrNull()?.onOutput(id, data)
+                },
+                onPublicOutput = { id, data ->
+                    if (!destroying.get()) {
+                        notifyListeners(
+                            "terminalOutput",
+                            JSObject().put("sessionId", id).put("dataBase64", data),
+                        )
+                    }
+                },
+            )
+        }
+
+        override fun onTerminalExit(sessionId: String, exitCode: Int) {
+            if (!destroying.get()) {
+                notifyListeners(
+                    "terminalExit",
+                    JSObject().put("sessionId", sessionId).put("exitCode", exitCode),
+                )
+            }
+        }
+    }
+
+    private fun applyKeepScreenAwake(enabled: Boolean) {
+        activity?.runOnUiThread {
+            if (enabled) {
+                activity?.window?.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+            } else {
+                activity?.window?.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+            }
+        }
+    }
+
+    private fun RuntimeSettings.toJs(): JSObject = JSObject()
+        .put("manifestUrl", manifestUrl)
+        .put("manifestSha256", manifestSha256)
+        .put("keepScreenAwake", keepScreenAwake)
+        .put("terminalFontSize", terminalFontSize)
+        .put("configuredModelProviders", org.json.JSONArray(configuredModelProviders.map { it.wireValue }))
+        .put("harnessConfiguredModelProviders", org.json.JSONArray(harnessConfiguredModelProviders.map { it.wireValue }))
+        .put("deepSeekAccountConfigured", deepSeekAccountConfigured)
+        .put("customModelProviders", org.json.JSONArray().also { providers ->
+            customModelProviders.forEach { provider ->
+                providers.put(JSObject()
+                    .put("id", provider.id)
+                    .put("name", provider.name)
+                    .put("api", provider.api.wireValue)
+                    .put("baseUrl", provider.baseUrl)
+                    .put("models", org.json.JSONArray().also { models ->
+                        provider.models.forEach { model ->
+                            models.put(JSObject().put("id", model.id).put("name", model.name)
+                                .put("contextWindow", model.contextWindow).put("maxTokens", model.maxTokens)
+                                .apply { model.input?.let { put("input", org.json.JSONArray(it)) } })
+                        }
+                    }))
+            }
+        })
+        .put("configuredCustomModelProviders", org.json.JSONArray(configuredCustomModelProviders))
+        .put("harnessConfiguredCustomModelProviders", org.json.JSONArray(harnessConfiguredCustomModelProviders))
+        .put("defaultModels", JSObject().also { defaults ->
+            io.deepseekharness.mobile.runtime.ModelProvider.entries.forEach { provider ->
+                defaultModels[provider]?.let { defaults.put(provider.wireValue, it) }
+            }
+        })
+        .put("keepRuntimeInBackground", keepRuntimeInBackground)
+        .put("overlayBallEnabled", overlayBallEnabled)
+        // 前端据此决定应用启动后是否静默调用 startHarness；缺失时前端按 false 处理。
+        .put("prewarmHarness", prewarmHarness)
+        // 页面网络访问档位；缺失时前端按 `app`（只连本机）处理。
+        .put("pageNetworkAccess", pageNetworkAccess.wireValue)
+
+    private fun RuntimeKeepAliveSnapshot.toJs(): JSObject = JSObject()
+        .put("keepRuntimeInBackground", keepRuntimeInBackground)
+        .put("foregroundServiceActive", foregroundServiceActive)
+        .put("notificationPermission", notificationPermissionState())
+        .put("promotedNotificationPermission", TaskLiveNotificationCompat.promotedNotificationPermissionState(context))
+        // 前台服务未运行时，最近一次被系统拒绝启动的原因令牌（受控枚举，null=无失败或正在运行）。
+        // 界面据此区分「缺通知权限」与「厂商后台策略拒绝」，给出可操作的指引而不是一句泛化的「未生效」。
+        .put(
+            "foregroundStartError",
+            HarnessKeepAliveService.lastStartFailure?.takeUnless { foregroundServiceActive },
+        )
+        .put("deviceShellReady", deviceShellReady)
+        .put("reconnectRequired", reconnectRequired)
+        .put("lastIntent", lastIntent.wireValue)
+        // 两个进程内字段无条件出现：前端把缺省当 0，但语义上它们总是有意义的。
+        .put("lastTurnCompletedAtMillis", lastTurnCompletedAtMillis.coerceAtLeast(0L))
+        .put("turnCompletionSequence", turnCompletionSequence.coerceAtLeast(0L))
+        .also { json ->
+            lastPhase?.let { json.put("lastPhase", it.wireValue) }
+            json.put("lastUpdatedAtMillis", lastUpdatedAtMillis.coerceAtLeast(0L))
+        }
+
+    private fun RuntimeStateSnapshot.toProgressJs(): JSObject = JSObject()
+        .put("phase", phase.wireValue)
+        .put("downloadedBytes", downloadedBytes)
+        .put("totalBytes", totalBytes)
+        .also { json -> errorCode?.let { json.put("errorCode", it) } }
+
+    private fun RuntimeStateSnapshot.toJs(): JSObject = JSObject()
+        .put("phase", phase.wireValue)
+        .put("architecture", architecture)
+        .put("updateAvailable", updateAvailable)
+        .put("downloadedBytes", downloadedBytes)
+        .put("totalBytes", totalBytes)
+        .put("runnerAvailable", runnerAvailable)
+        .also { json ->
+            installedVersion?.let { json.put("installedVersion", it) }
+            harnessUrl?.let { json.put("harnessUrl", it) }
+            errorCode?.let { json.put("errorCode", it) }
+        }
+
+    /**
+     * 运行时版本列表。
+     *
+     * `canSwitch`/`canDelete` 只说「磁盘上有没有可用的上一版本」这个真值，**不含**「此刻是否在跑」：
+     * 运行中不允许切换由界面按 `phase` 决定按钮是否可用，而请求本身仍会被控制器以 `RUNTIME_BUSY` 拒绝。
+     */
+    private fun List<RuntimeVersionInfo>.toJs(): JSObject {
+        val array = JSArray()
+        forEach { info ->
+            array.put(
+                JSObject()
+                    .put("slot", info.slot)
+                    .put("version", info.version)
+                    .put("runtimeId", info.runtimeId)
+                    .put("extractedBytes", info.extractedBytes)
+                    .put("active", info.active)
+                    .also { json -> info.dshVersion?.let { json.put("dshVersion", it) } },
+            )
+        }
+        val hasCurrent = any { it.slot == RuntimeVersionPolicy.SLOT_CURRENT }
+        val hasPrevious = any { it.slot == RuntimeVersionPolicy.SLOT_PREVIOUS }
+        val libraryArray = RuntimeLibrary(controller.store).list()
+        val libraryCapacity = RuntimeLibrary.MAX_CAPACITY
+        return JSObject()
+            .put("versions", array)
+            .put("library", libraryArray)
+            .put("libraryCapacity", libraryCapacity)
+            .put("canSwitch", RuntimeVersionPolicy.canSwitch(hasCurrent, hasPrevious))
+            .put("canDelete", RuntimeVersionPolicy.canDelete(hasPrevious))
+    }
+
+    /**
+     * Shizuku 状态过桥。
+     *
+     * `version` 是**服务端 API 版本**（13.x 的应用都上报 13），`appVersion` 才是已安装
+     * Shizuku 应用的版本名（如 13.6.0）；两者都要给前端，界面必须分开显示，
+     * 否则用户更新 Shizuku 后会以为「版本识别错了」。
+     */
+    private fun ShizukuState.toJs(): JSObject = JSObject()
+        .put("installed", installed)
+        .put("running", running)
+        .put("permission", permission)
+        .put("connected", connected)
+        .put("version", version)
+        .put("appVersion", appVersion)
+
+    private fun io.deepseekharness.mobile.shizuku.HighRiskPermissions.toJs(): JSObject {
+        val cats = JSObject()
+        for (category in io.deepseekharness.mobile.shizuku.HighRiskCategory.entries) {
+            cats.put(category.wireValue, isCategoryEnabled(category))
+        }
+        return JSObject()
+            .put("enabled", enabled)
+            .put("categories", cats)
+    }
+
+}
+
+internal fun dispatchTerminalOutput(
+    sessionId: String,
+    dataBase64: String,
+    suppressPublicOutput: Boolean,
+    onDeviceCommandOutput: (sessionId: String, dataBase64: String) -> Unit,
+    onPublicOutput: (sessionId: String, dataBase64: String) -> Unit,
+) {
+    onDeviceCommandOutput(sessionId, dataBase64)
+    if (!suppressPublicOutput) onPublicOutput(sessionId, dataBase64)
+}

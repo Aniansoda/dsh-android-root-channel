@@ -1,0 +1,16 @@
+{
+  "dsh": {
+    "profile": {
+      "bundles": [
+        "@deepseek-ai/dsh-base",
+        "@deepseek-ai/dsh-web-app",
+        "@deepseek-harness/dsh-mobile-shizuku",
+        "dshmarket"
+      ]
+    }
+  },
+  "mobile": {
+    "idleStopMinutes": 15,
+    "embedRootfs": false
+  }
+}

@@ -1,0 +1,881 @@
+package io.deepseekharness.mobile
+
+import android.annotation.SuppressLint
+import android.content.ContentResolver
+import android.content.Intent
+import android.content.res.Configuration
+import android.graphics.drawable.ColorDrawable
+import android.net.Uri
+import android.os.Build
+import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
+import android.os.SystemClock
+import android.view.WindowManager
+import android.webkit.CookieManager
+import android.webkit.HttpAuthHandler
+import android.webkit.RenderProcessGoneDetail
+import android.webkit.SslErrorHandler
+import android.webkit.ValueCallback
+import android.webkit.WebChromeClient
+import android.webkit.WebResourceError
+import android.webkit.WebResourceRequest
+import android.webkit.WebResourceResponse
+import android.webkit.WebSettings
+import android.webkit.WebView
+import android.webkit.WebViewClient
+import android.webkit.WebViewDatabase
+import android.widget.Toast
+import androidx.activity.OnBackPressedCallback
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.appcompat.app.AlertDialog
+import androidx.appcompat.app.AppCompatActivity
+import androidx.core.view.ViewCompat
+import androidx.webkit.WebSettingsCompat
+import androidx.webkit.WebViewFeature
+import io.deepseekharness.mobile.runtime.HarnessAccess
+import io.deepseekharness.mobile.runtime.PageNetworkAccess
+import io.deepseekharness.mobile.runtime.RuntimeFailure
+import io.deepseekharness.mobile.runtime.RuntimeStore
+import io.deepseekharness.mobile.runtime.RuntimeWorkspaceFiles
+import io.deepseekharness.mobile.runtime.WorkspaceFileSharing
+import java.io.ByteArrayInputStream
+import java.net.URI
+import java.util.concurrent.Executors
+
+class HarnessActivity : AppCompatActivity() {
+    private lateinit var webView: WebView
+    private lateinit var allowedOrigin: Origin
+    private var pageLoadGate = HarnessPageLoadGate()
+    private val authenticationOwner = Any()
+    private var boundAccess: HarnessAccess? = null
+    private var pageFailureHandled = false
+    private var pageRetryCount = 0
+    private var rendererRecovery = false
+    private var entryUrlForRetry: String? = null
+    /** 已经装过 document-start 补丁的源；同一个 WebView 重绑定时不重复安装。 */
+    private var polyfilledOriginRule: String? = null
+    /** 已经装过 document-start 主题脚本的源；换源时重装（主题值变化由 HarnessThemeBridge 自己换）。 */
+    private var themedOriginRule: String? = null
+    /** The OAuth page is opened by Harness with window.open(); keep its transport WebView detached. */
+    private var authorizationPopup: WebView? = null
+    private val pageRetryHandler = Handler(Looper.getMainLooper())
+    /**
+     * 预览面板分享专用线程：复制工作区文件可能到几十 MB，不能占主线程。
+     * 单线程串行，避免用户连点两次同时复制同一份大文件。
+     */
+    private val workspaceShareExecutor = Executors.newSingleThreadExecutor { runnable ->
+        Thread(runnable, "dsh-workspace-share").apply { isDaemon = true }
+    }
+    private val exitConfirmationPolicy = HarnessExitConfirmationPolicy()
+    private var exitConfirmationDialog: AlertDialog? = null
+
+    /** 等待用户从系统选择器返回的 WebView 回调；同一时刻只允许一个，页面靠它继续上传。 */
+    private var pendingFileChooser: ValueCallback<Array<Uri>>? = null
+
+    /**
+     * 单选：用 SAF 的 OpenDocument，保证返回 content:// 且能按 MIME 过滤（页面请求图片类型时
+     * 会直接进相册）。刻意不用 ACTION_GET_CONTENT：部分 provider 会返回 file://，而 WebView 的
+     * allowFileAccess 保持关闭。
+     */
+    private val singleFileChooser = registerForActivityResult(
+        ActivityResultContracts.OpenDocument(),
+    ) { uri -> deliverFileChooserResult(listOfNotNull(uri)) }
+
+    private val multipleFileChooser = registerForActivityResult(
+        ActivityResultContracts.OpenMultipleDocuments(),
+    ) { uris -> deliverFileChooserResult(uris) }
+
+    companion object {
+        /**
+         * HTTP Auth 数据库清理专用线程：进程级单线程、守护线程。
+         * 单次调用只做一次毫秒级 SQLite 删除，串行即可，无需随 Activity 关闭。
+         */
+        private val authDatabaseExecutor = Executors.newSingleThreadExecutor { runnable ->
+            Thread(runnable, "dsh-webview-auth-db").apply { isDaemon = true }
+        }
+
+        const val AUTH_TOKEN_COOKIE = "dsh_mobile_token"
+        const val EXTRA_SESSION_ID = "io.deepseekharness.mobile.extra.SESSION_ID"
+        const val EXTRA_RESET_TO_HOME = "io.deepseekharness.mobile.extra.RESET_TO_HOME"
+
+        /**
+         * 任意 MIME 类型。
+         *
+         * 单独放成常量有两个原因：SAF 既不接受扩展名过滤也不接受空数组，必须回退到它；
+         * 同时避免这个字面量散落在注释密集的代码里（Kotlin 块注释可嵌套，注释中一旦出现
+         * 斜杠加星号就会把后续代码吞进注释）。
+         */
+        private const val ANY_MIME_TYPE = "*/*"
+    }
+
+    override fun attachBaseContext(newBase: android.content.Context) {
+        super.attachBaseContext(AppLanguage.localizedContext(newBase))
+    }
+
+    override fun onResume() {
+        super.onResume()
+        AppForeground.onActivityResumed(this)
+        AppOrientationPreference.apply(this)
+        // 运行时停止或自动重启会撤销上一周期的授权。此 Activity 可能仍在任务栈里，
+        // 不能让它继续展示或使用旧的 WebView 凭据；管理页重新打开 Harness 时会重新绑定。
+        if (::webView.isInitialized && !AppAuthenticationState.ownsHarnessAccess(authenticationOwner)) {
+            finish()
+            return
+        }
+        // 控制台也是一个窗口：主题在 Web 侧改过、或系统深色模式在后台切换过之后，
+        // 回到前台都要按已保存的模式重算状态栏，否则它会与页面配色不一致。
+        applyNativeChrome()
+        // 用户可能刚在外壳里点过「让 DSH 使用当前主题」：从后台回来时补一次，
+        // 不要求他手动刷新页面。
+        if (::webView.isInitialized) HarnessThemeBridge.apply(webView)
+        // 若有等待应用内确认的高危/极危 Root 命令，回到对话页时立即拉起警告确认页。
+        io.deepseekharness.mobile.shizuku.RootApprovalCoordinator.presentIfPending(this)
+    }
+
+    override fun onPause() {
+        AppForeground.onActivityPaused(this)
+        super.onPause()
+    }
+
+    override fun onStart() {
+        super.onStart()
+        exitConfirmationPolicy.reset()
+        // 控制台与外壳共用同一个「是否在前台」计数器：控制台叠在外壳之上，
+        // 只有两者都停了才算切到后台（用布尔标志会在关闭控制台时误判，见 AppForeground 的说明）。
+        AppForeground.onActivityStarted()
+        io.deepseekharness.mobile.runtime.TaskNotification.clear(this)
+    }
+
+    override fun onStop() {
+        AppForeground.onActivityStopped()
+        io.deepseekharness.mobile.runtime.TaskNotification.refreshTaskStatus(this)
+        super.onStop()
+    }
+
+    override fun onConfigurationChanged(newConfig: Configuration) {
+        super.onConfigurationChanged(newConfig)
+        // Harness 页面保留同一个 WebView；旋转只重算原生栏与安全区，不重载会话页面。
+        AppOrientationPreference.apply(this)
+        if (!::webView.isInitialized) return
+        applyNativeChrome()
+        // 监听器已在 onCreate 注册；重新注册会把已应用的 padding 当成 initial，导致
+        // 每次旋转都累加安全区。只请求已有监听器按新尺寸重新计算。
+        ViewCompat.requestApplyInsets(findViewById(android.R.id.content))
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        resetExitConfirmation()
+        val resetToHome = intent.getBooleanExtra(EXTRA_RESET_TO_HOME, false)
+        val nextSessionId = sessionIdExtra(intent)
+        if (!::webView.isInitialized) return
+        val access = AppAuthenticationState.harnessAccess() ?: run {
+            finish()
+            return
+        }
+        // 通知回到同一运行周期时保留页面；新运行周期即使没有跳转 extra 也必须重绑。
+        if (resetToHome || nextSessionId != null || access != boundAccess ||
+            !AppAuthenticationState.ownsHarnessAccess(authenticationOwner)
+        ) {
+            bindHarnessAccess(access, nextSessionId.takeUnless { resetToHome }, clearHistory = resetToHome)
+        }
+    }
+
+    /**
+     * 读取会话直达的 extra，并把格式不合规的值挡在入口 URL 之外。
+     *
+     * Activity 不导出（`android:exported="false"`），这个 extra 只可能来自本应用的桥接，
+     * 但仍然在边界上收口：非法值按「没有会话」处理——宁可不跳转，也不要让一次畸形参数
+     * 把 HarnessActivity 直接崩掉。真正的契约错误（桥接侧传了非法会话键）由桥接层先拦。
+     */
+    private fun sessionIdExtra(intent: Intent?): String? = try {
+        HarnessPageUrl.requireValidSessionId(intent?.getStringExtra(EXTRA_SESSION_ID))
+    } catch (_: IllegalArgumentException) {
+        null
+    }
+
+    @SuppressLint("SetJavaScriptEnabled")
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        AppOrientationPreference.apply(this)
+        val access = AppAuthenticationState.harnessAccess() ?: run {
+            finish()
+            return
+        }
+        val runtimeStore = RuntimeStore(this)
+        if (runtimeStore.keepScreenAwake()) {
+            window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        }
+
+        setContentView(R.layout.activity_harness)
+        AppWindowInsets.apply(this)
+        // 会话页让出整条工具栏空间，返回交给系统手势与返回键。
+        applyNativeChrome()
+
+        webView = findViewById(R.id.harness_web_view)
+        webView.settings.apply {
+            javaScriptEnabled = true
+            domStorageEnabled = true
+            allowFileAccess = false
+            // 必须允许 content:// 访问，否则 <input type="file"> 选择结果（SAF 返回的都是
+            // content:// URI）无法被 WebView 读取，系统文件选择器等于白弹。
+            // 页面自身发起的 content:// 加载仍然被 RestrictedWebViewClient 拦成 403，
+            // 因此这里放开的是"读取用户在系统选择器里明确选中的文件"，而不是任意 provider 读取。
+            allowContentAccess = true
+            mixedContentMode = WebSettings.MIXED_CONTENT_NEVER_ALLOW
+            javaScriptCanOpenWindowsAutomatically = false
+            // DeepSeek account login opens an about:blank popup and assigns its location
+            // asynchronously.  Keep multiple-window support on so onCreateWindow can
+            // intercept that navigation without ever loading an external page in this WebView.
+            setSupportMultipleWindows(true)
+            // 默认不放行媒体自播；唯一的例外是「同步中的静音背景视频」，
+            // 由 HarnessThemeBridge.syncAutoplay 按背景状态逐次对齐，关掉背景就收回。
+            mediaPlaybackRequiresUserGesture = true
+            builtInZoomControls = false
+            displayZoomControls = false
+            safeBrowsingEnabled = true
+            // 控制台界面的字号跟随系统字号（登记册 5.6-I）：外壳 CSS 已全部 rem 化，
+            // 但 WebView 不会因为系统字号变化就改变 rem 基准，只有 textZoom 能带上这件事。
+            // fontScale 不在 configChanges 里，系统改字号会重建本 Activity，因此读一次即可。
+            textZoom = AppTextScale.percentOf(resources.configuration.fontScale)
+        }
+        // 页面自带完整的两套调色板（官方 ui-theme），算法加深会在这个基础上再反相一次；
+        // 而且它的判定发生在页面加载时、重载后重新判定——表现正好是「刷新前后方向相反」。
+        // 关掉之后，深浅只由外壳同步过来的那一个结论（HarnessThemeBridge）决定。
+        if (WebViewFeature.isFeatureSupported(WebViewFeature.ALGORITHMIC_DARKENING)) {
+            runCatching { WebSettingsCompat.setAlgorithmicDarkeningAllowed(webView.settings, false) }
+        }
+        // 没有 WebChromeClient 时 <input type="file"> 点了毫无反应：这是插件"从相册导入"
+        // 这类入口在手机上完全不可用的根因（皮肤中心只能靠手填容器路径绕过）。
+        webView.webChromeClient = HarnessWebChromeClient()
+        // 设置页改「连背景一起同步」时插件在本进程内改档，需要一块还没销毁的 WebView 来重放。
+        HarnessThemeBridge.attach(webView)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
+            WebView.startSafeBrowsing(applicationContext, null)
+        }
+        bindHarnessAccess(access, sessionIdExtra(intent))
+
+        onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
+            override fun handleOnBackPressed() {
+                when (exitConfirmationPolicy.onBackPressed(
+                    canGoBack = webView.canGoBack(),
+                    nowMs = SystemClock.elapsedRealtime(),
+                )) {
+                    HarnessExitConfirmationPolicy.Decision.WEB_BACK -> webView.goBack()
+                    HarnessExitConfirmationPolicy.Decision.PROMPT -> showExitConfirmation()
+                    HarnessExitConfirmationPolicy.Decision.EXIT -> returnToMainActivity()
+                }
+            }
+        })
+    }
+
+    private fun bindHarnessAccess(access: HarnessAccess, sessionId: String?, clearHistory: Boolean = false) {
+        val origin = Origin.parse(access.url) ?: run {
+            finish()
+            return
+        }
+        val cookie = try {
+            HarnessSessionCookie.authenticated(access.password)
+        } catch (_: IllegalArgumentException) {
+            finish()
+            return
+        }
+        if (!AppAuthenticationState.claimHarnessAccess(authenticationOwner, access)) {
+            finish()
+            return
+        }
+        var discardHistory = clearHistory || boundAccess != access
+        resetExitConfirmation()
+        pageLoadGate.cancel()
+        val gate = HarnessPageLoadGate()
+        pageLoadGate = gate
+        pageRetryHandler.removeCallbacksAndMessages(null)
+        pageFailureHandled = false
+        pageRetryCount = 0
+        deliverFileChooserResult(emptyList())
+        closeAuthorizationPopup()
+        webView.stopLoading()
+        if (discardHistory) webView.clearHistory()
+        boundAccess = access
+        allowedOrigin = origin
+        // 页面网络访问档位是原生偏好：每个跨源请求现读，用户改完设置不必重开对话页。
+        // SharedPreferences 读的是内存里的缓存表，逐请求读不会碰磁盘。
+        val settingsStore = RuntimeStore(this)
+        val entryUrl = HarnessPageUrl.withVersions(
+            origin.initialUrl,
+            BuildConfig.VERSION_NAME,
+            settingsStore.installedManifest()?.version,
+            sessionId,
+        )
+        entryUrlForRetry = entryUrl
+        webView.settings.cacheMode = when (HarnessPageCache.modeFor(entryUrl)) {
+            HarnessCacheMode.NORMAL -> WebSettings.LOAD_DEFAULT
+            HarnessCacheMode.BYPASS -> WebSettings.LOAD_NO_CACHE
+        }
+        webView.webViewClient = RestrictedWebViewClient(
+            origin, access.username, access.password,
+            onDeepSeekAuthorization = ::openDeepSeekAuthorization,
+            onMainFrameFailure = {
+                if (pageLoadGate === gate && AppAuthenticationState.ownsHarnessAccess(authenticationOwner)) {
+                    handleMainFrameFailure()
+                }
+            },
+            onMainFrameLoaded = { view ->
+                if (discardHistory && pageLoadGate === gate && view.url == entryUrl) {
+                    discardHistory = false
+                    view.clearHistory()
+                }
+                // 每次主框架加载完都重放一次已同步的主题；没有同步过时它什么都不做。
+                HarnessThemeBridge.apply(view)
+                // document-start 不支持时的兜底：老 WebView 缺 AbortSignal.any / throwIfAborted /
+                // toSorted，「选择工作区目录」和模型列表会在点开时报 "is not a function"。缺失才补，
+                // 支持 document-start 的 provider 上这里只是重复执行一遍幂等脚本。
+                HarnessPolyfill.apply(view)
+                // 官方预览面板没有分享入口；补一个按钮，点击回到原生分享。
+                HarnessWorkspaceShare.apply(view)
+                // 官方文件面板的路径不可点；补一层可点的面包屑（只在工作区内跳转）。
+                HarnessFilesPath.apply(view)
+            },
+            onWorkspaceShare = ::shareWorkspaceFile,
+            pageNetwork = { settingsStore.pageNetworkAccess() },
+        )
+        // 旧 WebView 缺 ES2023 数组方法、AbortSignal.any 与 throwIfAborted：能在 document-start
+        // 注入时最先补上，不至于等 onPageFinished 才生效；不支持该能力的 provider 由
+        // onMainFrameLoaded 兜底。
+        val originRule = origin.originRule()
+        if (polyfilledOriginRule != originRule) {
+            HarnessPolyfill.installDocumentStart(webView, originRule)
+            polyfilledOriginRule = originRule
+        }
+        // 主题也要在页面脚本之前落地：只在 onPageFinished 注入时，页面 boot 脚本已经按它
+        // 自己的明暗偏好画过一帧（「刷新前后方向相反」的观感来源之一）。注册的那份脚本带的是
+        // 当前主题常量，设置里改主题时由 HarnessThemeBridge 自己换掉；这里只负责首次安装。
+        if (themedOriginRule != originRule) {
+            HarnessThemeBridge.installDocumentStart(webView, originRule)
+            themedOriginRule = originRule
+        }
+        clearHttpAuthCredentialsAsync()
+        val cookies = CookieManager.getInstance().apply {
+            setAcceptCookie(true)
+            setAcceptThirdPartyCookies(webView, false)
+        }
+        // 每轮绑定单独持有 gate；上一轮迟到的 Cookie 回调不能触发新一轮导航。
+        cookies.setCookie(HarnessSessionCookie.origin(origin.port), cookie) { accepted ->
+            pageRetryHandler.post {
+                if (isFinishing || isDestroyed || pageLoadGate !== gate ||
+                    !AppAuthenticationState.ownsHarnessAccess(authenticationOwner)
+                ) return@post
+                when (gate.onCookieStored(accepted)) {
+                    CookieLoadDecision.LOAD -> {
+                        cookies.flush()
+                        webView.loadUrl(entryUrl)
+                    }
+                    CookieLoadDecision.REJECT -> {
+                        Toast.makeText(this, R.string.harness_session_failed, Toast.LENGTH_SHORT).show()
+                        returnToMainActivity()
+                    }
+                    CookieLoadDecision.IGNORE -> Unit
+                }
+            }
+        }
+    }
+
+    /**
+     * 预览面板点「分享」后的原生处理。
+     *
+     * 页面传来的可能是预览标题栏解析出的绝对路径，也可能只是资源地址（见
+     * [WorkspaceShareAddress.relativePaths]）；这里先还原成工作区相对路径，路径校验和
+     * 文件复制都在后台线程完成（只允许 `root/1` 下的普通文件），最后回到主线程弹系统
+     * 分享面板。失败时不回传具体文件路径或系统错误，只给一条通用提示；只有「解析成功但
+     * 工作区里没有这个文件」才单独说明，便于区分页面给的地址与工作区实际内容对不上。
+     */
+    private fun shareWorkspaceFile(raw: String) {
+        if (isFinishing || isDestroyed) return
+        // 相对地址可能多带一层会话工作目录前缀（见 WorkspaceShareAddress.relativePaths）。
+        val candidates = WorkspaceShareAddress.relativePaths(raw)
+        if (candidates == null) {
+            Toast.makeText(this, R.string.harness_file_action_failed, Toast.LENGTH_SHORT).show()
+            return
+        }
+        val app = this
+        workspaceShareExecutor.execute {
+            val result = try {
+                Result.success(
+                    WorkspaceFileSharing.chooser(app, RuntimeStore(app), app.cacheDir, candidates, open = false),
+                )
+            } catch (failure: RuntimeFailure) {
+                Result.failure<Intent>(failure)
+            } catch (error: Exception) {
+                Result.failure(error)
+            }
+            runOnUiThread {
+                if (isFinishing || isDestroyed) return@runOnUiThread
+                val chooser = result.getOrNull()
+                if (chooser == null) {
+                    val code = (result.exceptionOrNull() as? RuntimeFailure)?.code
+                    val message = when (code) {
+                        WorkspaceFileSharing.NOT_IN_WORKSPACE -> R.string.harness_file_share_unavailable
+                        RuntimeWorkspaceFiles.SHARE_FILE_TOO_LARGE -> R.string.harness_file_share_too_large
+                        else -> R.string.harness_file_action_failed
+                    }
+                    Toast.makeText(app, message, Toast.LENGTH_SHORT).show()
+                    return@runOnUiThread
+                }
+                try {
+                    startActivity(chooser)
+                } catch (_: Exception) {
+                    Toast.makeText(app, R.string.harness_file_action_failed, Toast.LENGTH_SHORT).show()
+                }
+            }
+        }
+    }
+
+    override fun onDestroy() {
+        resetExitConfirmation()
+        // 只拒绝新任务；正在复制的那一次会自然跑完，再在主线程丢弃结果。
+        workspaceShareExecutor.shutdown()
+        pageLoadGate.cancel()
+        if (!isChangingConfigurations) OverlayBallService.closeConversation()
+        // 页面可能仍在等待选择结果：必须显式回传 null，否则该 input 会永久处于"等待选择文件"。
+        deliverFileChooserResult(emptyList())
+        if (::webView.isInitialized) {
+            HarnessThemeBridge.detach(webView)
+            webView.stopLoading()
+            webView.webChromeClient = null
+            webView.webViewClient = WebViewClient()
+            webView.removeAllViews()
+            webView.destroy()
+        }
+        closeAuthorizationPopup()
+        pageRetryHandler.removeCallbacksAndMessages(null)
+        val revoked = !isChangingConfigurations && !rendererRecovery &&
+            AppAuthenticationState.revokeHarness(authenticationOwner)
+        val authWasInvalidated = !AppAuthenticationState.isHarnessAuthenticated()
+        if (::allowedOrigin.isInitialized && !isChangingConfigurations && !rendererRecovery &&
+            (revoked || authWasInvalidated)) {
+            // 清除注入的鉴权 Cookie：token 每次启动重新生成，旧值无意义。
+            val cookieManager = CookieManager.getInstance()
+            cookieManager.setCookie(
+                HarnessSessionCookie.origin(allowedOrigin.port),
+                HarnessSessionCookie.expired(),
+            ) { cookieManager.flush() }
+        }
+        // 与 onCreate 相同：磁盘清理放后台，不占用销毁链路的主线程时间。
+        clearHttpAuthCredentialsAsync()
+        super.onDestroy()
+    }
+
+    private fun returnToMainActivity() {
+        if (isFinishing) return
+        resetExitConfirmation()
+        startActivity(
+            Intent(this, MainActivity::class.java)
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_REORDER_TO_FRONT or Intent.FLAG_ACTIVITY_SINGLE_TOP),
+        )
+    }
+
+    /** 在 DSH 入口页离开前明确提醒用户，避免系统返回手势误触导致切回应用。 */
+    private fun showExitConfirmation() {
+        if (isFinishing || isDestroyed) return
+        exitConfirmationDialog?.let { dialog ->
+            if (dialog.isShowing) return
+        }
+        exitConfirmationDialog = AlertDialog.Builder(this)
+            .setTitle(R.string.harness_exit_confirm_title)
+            .setMessage(R.string.harness_exit_confirm_message)
+            .setNegativeButton(R.string.harness_exit_confirm_cancel) { _, _ ->
+                resetExitConfirmation()
+            }
+            .setPositiveButton(R.string.harness_exit_confirm_ok) { _, _ ->
+                resetExitConfirmation()
+                returnToMainActivity()
+            }
+            .create()
+            .also { dialog ->
+                // 对话框打开后再次按系统返回，视为用户完成了第二次确认；
+                // 点击对话框外部不会取消，避免误触直接离开 DSH。
+                dialog.setCanceledOnTouchOutside(false)
+                dialog.setOnCancelListener {
+                    resetExitConfirmation()
+                    returnToMainActivity()
+                }
+                dialog.setOnDismissListener { exitConfirmationDialog = null }
+                dialog.show()
+            }
+    }
+
+    private fun resetExitConfirmation() {
+        exitConfirmationPolicy.reset()
+        exitConfirmationDialog?.dismiss()
+        exitConfirmationDialog = null
+    }
+
+    /**
+     * 在后台线程清空 WebView 的 HTTP Auth 凭据缓存。
+     *
+     * WebViewDatabase 的获取与清理都是磁盘操作，官方同样建议在后台线程调用；
+     * 失败静默：清理只是跨会话的卫生兜底，绝不允许它影响会话页生命周期。
+     */
+    private fun clearHttpAuthCredentialsAsync() {
+        authDatabaseExecutor.execute {
+            runCatching {
+                WebViewDatabase.getInstance(applicationContext).clearHttpAuthUsernamePassword()
+            }
+        }
+    }
+
+    /** 系统栏和网页背景跟随应用主题，不额外占用会话高度。 */
+    private fun applyNativeChrome() {
+        if (isFinishing || isDestroyed) return
+        val dark = AppThemePreference.isDark(
+            AppThemePreference.current(this),
+            AppThemePreference.systemNight(this),
+        )
+        // 按保存的主题解析颜色，允许应用主题与系统不同。
+        val configuration = Configuration(resources.configuration).apply {
+            uiMode = (uiMode and Configuration.UI_MODE_NIGHT_MASK.inv()) or
+                if (dark) Configuration.UI_MODE_NIGHT_YES else Configuration.UI_MODE_NIGHT_NO
+        }
+        val palette = createConfigurationContext(configuration)
+        val background = palette.getColor(R.color.harness_toolbar_background)
+        AppThemePreference.applySafely(this, backgroundColor = background)
+        window.setBackgroundDrawable(ColorDrawable(background))
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            window.isNavigationBarContrastEnforced = false
+        }
+        findViewById<WebView>(R.id.harness_web_view)
+            .setBackgroundColor(palette.getColor(R.color.harness_page_background))
+    }
+
+    /**
+     * 把系统选择器的结果交回 WebView。
+     *
+     * 无论用户选中、取消还是选择被系统中断，都必须回调一次：
+     *  - 有结果 → 只保留 content:// URI，其余一律丢弃（WebView 只允许读 content://）；
+     *  - 无结果 → 回传 null，让页面恢复可交互。
+     */
+    private fun deliverFileChooserResult(uris: List<Uri>) {
+        val callback = pendingFileChooser ?: return
+        pendingFileChooser = null
+        val accepted = uris.filter { it.scheme == ContentResolver.SCHEME_CONTENT }
+        try {
+            callback.onReceiveValue(accepted.takeIf { it.isNotEmpty() }?.toTypedArray())
+        } catch (_: Throwable) {
+            // 回调属于 WebView 内部状态：失败也不得把 Activity 带崩。
+        }
+    }
+
+    /** Handles user-selected uploads and the provider's authorization popup only. */
+    private inner class HarnessWebChromeClient : WebChromeClient() {
+        override fun onCreateWindow(
+            view: WebView?,
+            isDialog: Boolean,
+            isUserGesture: Boolean,
+            resultMsg: android.os.Message?,
+        ): Boolean {
+            // Only a user-initiated popup may start account authorization.  A detached,
+            // JavaScript-disabled transport page prevents an untrusted redirect from
+            // receiving the localhost session cookie or HTTP Basic credentials.
+            if (view !== webView || !isUserGesture || resultMsg == null || isFinishing || isDestroyed ||
+                !AppAuthenticationState.ownsHarnessAccess(authenticationOwner)
+            ) return false
+            val transport = resultMsg.obj as? WebView.WebViewTransport ?: return false
+            closeAuthorizationPopup()
+            val popup = WebView(this@HarnessActivity).apply {
+                settings.apply {
+                    javaScriptEnabled = false
+                    domStorageEnabled = false
+                    allowFileAccess = false
+                    allowContentAccess = false
+                    mixedContentMode = WebSettings.MIXED_CONTENT_NEVER_ALLOW
+                    javaScriptCanOpenWindowsAutomatically = false
+                    setSupportMultipleWindows(false)
+                    safeBrowsingEnabled = true
+                }
+                webChromeClient = object : WebChromeClient() {
+                    override fun onCloseWindow(window: WebView?) {
+                        if (window === authorizationPopup) closeAuthorizationPopup()
+                    }
+                }
+                webViewClient = AuthorizationPopupClient()
+            }
+            authorizationPopup = popup
+            transport.webView = popup
+            resultMsg.sendToTarget()
+            return true
+        }
+
+        override fun onCloseWindow(window: WebView?) {
+            if (window === authorizationPopup) closeAuthorizationPopup()
+        }
+
+        override fun onShowFileChooser(
+            webView: WebView?,
+            filePathCallback: ValueCallback<Array<Uri>>?,
+            fileChooserParams: WebChromeClient.FileChooserParams?,
+        ): Boolean {
+            if (filePathCallback == null) return false
+            // 上一次选择还没回来就又触发一次：先取消旧的，避免页面拿到错位的结果。
+            deliverFileChooserResult(emptyList())
+            pendingFileChooser = filePathCallback
+            // 只接受标准 MIME（含 "/"）；页面给的是扩展名（如 ".png"）时退化为任意类型，
+            // 因为 SAF 不接受扩展名过滤。
+            val mimeTypes = fileChooserParams?.acceptTypes
+                ?.filter { it.contains('/') }
+                ?.toTypedArray()
+                ?.takeIf { it.isNotEmpty() }
+                ?: arrayOf(ANY_MIME_TYPE)
+            val multiple = fileChooserParams?.mode == WebChromeClient.FileChooserParams.MODE_OPEN_MULTIPLE
+            return try {
+                if (multiple) multipleFileChooser.launch(mimeTypes) else singleFileChooser.launch(mimeTypes)
+                true
+            } catch (_: Throwable) {
+                // 无法拉起选择器时立即回传 null，页面保持可交互；返回 false 让 WebView 走默认
+                //（即什么都不做），两者都不会让页面卡住。
+                deliverFileChooserResult(emptyList())
+                false
+            }
+        }
+    }
+
+    private fun closeAuthorizationPopup() {
+        val popup = authorizationPopup ?: return
+        authorizationPopup = null
+        popup.stopLoading()
+        popup.webChromeClient = null
+        popup.webViewClient = WebViewClient()
+        popup.destroy()
+    }
+
+    /** Never loads a network resource: WebView's shared cookie jar must not reach the popup. */
+    private inner class AuthorizationPopupClient : WebViewClient() {
+        override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean {
+            val uri = request?.url ?: return true
+            if (uri.toString() == "about:blank") return false
+            if (isDeepSeekAuthorizationNavigation(uri.toString(), request.method, request.isForMainFrame)) {
+                openDeepSeekAuthorization(uri)
+            }
+            return true
+        }
+
+        override fun shouldInterceptRequest(view: WebView?, request: WebResourceRequest?): WebResourceResponse? =
+            if (request?.url?.toString() == "about:blank") null else blockedResponse()
+
+        override fun onReceivedHttpAuthRequest(
+            view: WebView?, handler: HttpAuthHandler?, host: String?, realm: String?,
+        ) {
+            handler?.cancel()
+        }
+
+        override fun onRenderProcessGone(view: WebView?, detail: RenderProcessGoneDetail?): Boolean {
+            if (view === authorizationPopup) closeAuthorizationPopup()
+            return true
+        }
+    }
+
+    private fun openDeepSeekAuthorization(uri: Uri): Boolean {
+        if (!isDeepSeekAuthorizationUrl(uri.toString()) || isFinishing || isDestroyed ||
+            !AppAuthenticationState.ownsHarnessAccess(authenticationOwner)
+        ) return false
+        return try {
+            startActivity(Intent(Intent.ACTION_VIEW, uri).addCategory(Intent.CATEGORY_BROWSABLE))
+            // The system browser now owns the OAuth page; release the detached transport WebView
+            // so it cannot retain renderer state or a stale popup after the hand-off.
+            closeAuthorizationPopup()
+            true
+        } catch (_: Throwable) {
+            false
+        }
+    }
+
+    private fun handleMainFrameFailure() {
+        if (isFinishing || isDestroyed) return
+        if (pageRetryCount < 2) {
+            pageRetryCount++
+            val delay = 300L * pageRetryCount
+            pageRetryHandler.postDelayed({
+                if (isFinishing || isDestroyed || !::webView.isInitialized) return@postDelayed
+                webView.settings.cacheMode = WebSettings.LOAD_NO_CACHE
+                webView.loadUrl(entryUrlForRetry ?: return@postDelayed)
+            }, delay)
+            Toast.makeText(this, "页面连接中断，正在重试（${pageRetryCount}/2）", Toast.LENGTH_SHORT).show()
+            return
+        }
+        if (pageFailureHandled) return
+        pageFailureHandled = true
+        Toast.makeText(this, R.string.harness_page_failed, Toast.LENGTH_SHORT).show()
+    }
+
+    internal class Origin(val scheme: String, val host: String, val port: Int, val initialUrl: String) {
+        /** 传给 WebViewCompat.addDocumentStartJavaScript 的源规则；没有显式端口时不能补 ":". */
+        fun originRule(): String = if (port == -1) "$scheme://$host" else "$scheme://$host:$port"
+
+        fun allows(uri: Uri): Boolean =
+            uri.scheme == scheme && uri.host == host && uri.port == port && uri.userInfo == null
+
+        fun allows(uri: URI): Boolean =
+            uri.scheme == scheme && uri.host == host && uri.port == port && uri.userInfo == null
+
+        companion object {
+            fun parse(raw: String?): Origin? {
+                val uri = HarnessPageUrl.parseEntryUrl(raw) ?: return null
+                return Origin(uri.scheme, uri.host, uri.port, uri.toASCIIString())
+            }
+        }
+    }
+
+    internal class RestrictedWebViewClient(
+        private val origin: Origin,
+        private val username: String,
+        private val password: String,
+        private val onDeepSeekAuthorization: (Uri) -> Boolean = { false },
+        private val onMainFrameFailure: () -> Unit,
+        private val onRendererGone: (WebView?) -> Unit = { view ->
+            view?.destroy()
+            (view?.context as? HarnessActivity)?.finish()
+        },
+        private val onMainFrameLoaded: (WebView) -> Unit = {},
+        private val onWorkspaceShare: (String) -> Unit = {},
+        /**
+         * 页面网络访问档位，逐请求现读：默认只连本机，调用方按设置传入。
+         *
+         * 用取值函数而不是构造时的快照：悬浮球的小窗可能常开，用户在设置里改完档位
+         * 应当立刻生效，而不是等他关掉再开一次。
+         */
+        private val pageNetwork: () -> PageNetworkAccess = { PageNetworkAccess.APP },
+    ) : WebViewClient() {
+        override fun onPageFinished(view: WebView?, url: String?) {
+            if (view != null) onMainFrameLoaded(view)
+        }
+
+        override fun onReceivedHttpAuthRequest(
+            view: WebView?,
+            handler: HttpAuthHandler?,
+            host: String?,
+            realm: String?,
+        ) {
+            if (host == origin.host && realm == HarnessAccess.REALM) {
+                handler?.proceed(username, password)
+            } else {
+                handler?.cancel()
+            }
+        }
+
+        override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean {
+            val uri = request?.url ?: return true
+            // 预览面板的分享按钮：只认带用户手势的主框架 GET，且 scheme 必须是 dsh-share。
+            // 任何情况下都不让页面真的去加载这个地址（WebView 没有对应协议处理器）。
+            if (WorkspaceShareAddress.SCHEME.equals(uri.scheme, ignoreCase = true)) {
+                if (request.hasGesture() && request.method == "GET" && request.isForMainFrame) {
+                    onWorkspaceShare(uri.toString())
+                }
+                return true
+            }
+            if (origin.allows(uri)) return false
+            // A page must not be able to launch the external account chooser from a timer,
+            // redirect, or injected script.  Popup transport gets its own one-shot allowance
+            // from onCreateWindow after WebView has confirmed a real user gesture.
+            // Kotlin 不为 hasXxx() 生成合成属性（只有 get/is 前缀才生成），这里必须显式调用。
+            if (request.hasGesture() &&
+                isDeepSeekAuthorizationNavigation(uri.toString(), request.method, request.isForMainFrame)
+            ) {
+                onDeepSeekAuthorization(uri)
+            }
+            return true
+        }
+
+        override fun shouldInterceptRequest(view: WebView?, request: WebResourceRequest?): WebResourceResponse? {
+            val uri = request?.url ?: return blockedResponse()
+            // 外壳同步的背景：由原生按同源路径供给，支持 Range，也不放开文件权限。
+            // 先收紧来源、方法和框架级别：市场页等跨域资源也可能请求同名路径，不能
+            // 因为路径相同就拿到本机用户文件。
+            if (isHarnessBackgroundRequest(
+                    origin,
+                    uri,
+                    request.method,
+                    request.isForMainFrame,
+                )
+            ) {
+                val context = view?.context ?: return blockedResponse()
+                return HarnessThemeBridge.serveBackground(context, request)
+            }
+            // 市场目录和缩略图由插件直接请求 HTTPS 资源站；交给 WebView 执行正常的 TLS/CORS 校验。
+            // 不添加本机 Authorization 或 Cookie，也不允许资源站替换会话主页面。
+            if (origin.allows(uri) || HarnessPluginResources.allows(
+                    uri.toString(), request.method, request.isForMainFrame,
+                )) return null
+            // 用户选的档位只放宽「页面自己发起」的跨源请求；主框架导航仍由
+            // shouldOverrideUrlLoading 拦在外面，这里不会因为放行档位而把整个页面换掉。
+            if (HarnessPageNetworkPolicy.allows(pageNetwork(), uri.toString(), request.isForMainFrame)) return null
+            return blockedResponse()
+        }
+
+        override fun onReceivedSslError(view: WebView?, handler: SslErrorHandler?, error: android.net.http.SslError?) {
+            handler?.cancel()
+        }
+
+        override fun onReceivedError(
+            view: WebView?,
+            request: WebResourceRequest?,
+            error: WebResourceError?,
+        ) {
+            if (request?.isForMainFrame == true) onMainFrameFailure()
+        }
+
+        override fun onRenderProcessGone(view: WebView?, detail: RenderProcessGoneDetail?): Boolean {
+            val activity = view?.context as? HarnessActivity
+            if (activity != null && !activity.isFinishing) {
+                activity.rendererRecovery = true
+                activity.recreate()
+            } else onRendererGone(view)
+            return true
+        }
+    }
+}
+
+internal fun blockedResponse(): WebResourceResponse = WebResourceResponse(
+    "text/plain", "UTF-8", 403, "Forbidden", emptyMap(), ByteArrayInputStream(ByteArray(0)),
+)
+
+/** 背景只对当前 Harness origin 的子资源 GET/HEAD 请求开放。 */
+internal fun isHarnessBackgroundRequest(
+    origin: HarnessActivity.Origin,
+    uri: Uri,
+    method: String,
+    isForMainFrame: Boolean,
+): Boolean =
+    !isForMainFrame && method in setOf("GET", "HEAD") &&
+        uri.path == HarnessThemeBridge.BACKGROUND_PATH && origin.allows(uri)
+
+/** JVM-testable form of [isHarnessBackgroundRequest] without mockable Android Uri methods. */
+internal fun isHarnessBackgroundRequest(
+    origin: HarnessActivity.Origin,
+    rawUrl: String,
+    method: String,
+    isForMainFrame: Boolean,
+): Boolean =
+    !isForMainFrame && method in setOf("GET", "HEAD") && runCatching {
+        URI(rawUrl).let { it.path == HarnessThemeBridge.BACKGROUND_PATH && origin.allows(it) }
+    }.getOrDefault(false)
+
+internal fun isDeepSeekAuthorizationNavigation(raw: String, method: String, isMainFrame: Boolean): Boolean =
+    isMainFrame && method == "GET" && isDeepSeekAuthorizationUrl(raw)
+
+/** JVM-only form kept separate so the allowlist can be tested without Android WebView classes. */
+internal fun isDeepSeekAuthorizationUrl(raw: String): Boolean {
+    if (raw.length > 8192 || raw.any { it.isISOControl() || it == '\\' }) return false
+    return try {
+        val uri = URI(raw)
+        uri.scheme.equals("https", ignoreCase = true) &&
+            uri.host.equals("platform.deepseek.com", ignoreCase = true) &&
+            (uri.port == -1 || uri.port == 443) &&
+            uri.rawUserInfo == null &&
+            uri.rawPath == "/dsh/authorize" &&
+            uri.rawFragment == null &&
+            !uri.rawQuery.isNullOrBlank()
+    } catch (_: Exception) {
+        false
+    }
+}
