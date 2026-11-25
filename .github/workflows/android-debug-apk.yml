@@ -9,6 +9,11 @@ name: Build debug APK
 
 on:
   workflow_dispatch:
+    inputs:
+      test_package:
+        description: '打成 io.deepseekharness.mobile.test，与已装的正式版共存（不覆盖、不清数据）'
+        type: boolean
+        default: false
   push:
     branches:
       - main
@@ -103,7 +108,17 @@ jobs:
 
       - name: Build debug APK
         working-directory: android
-        run: ./gradlew :app:assembleDebug --no-daemon --stacktrace
+        env:
+          # 与正式版签名不同，直接覆盖安装会因签名不一致失败；
+          # -PdshTestPackage=true 让 debug 包改用 .test 后缀，与已装版本共存。
+          DSH_TEST_PACKAGE: ${{ inputs.test_package }}
+        run: |
+          set -euo pipefail
+          extra=""
+          if [ "${DSH_TEST_PACKAGE:-false}" = "true" ] || [ "${DSH_TEST_PACKAGE:-false}" = "1" ]; then
+            extra="-PdshTestPackage=true"
+          fi
+          ./gradlew :app:assembleDebug --no-daemon --stacktrace $extra
 
       - name: Collect APK
         run: |
